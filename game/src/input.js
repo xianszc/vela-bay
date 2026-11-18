@@ -1,53 +1,74 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard + mouse state for the whole game. The game never uses pointer
+// lock (headless browsers and iframes fight it); the camera orbits while the
+// player drags with the mouse, and the wheel zooms. `wasPressed` reports an
+// edge exactly once per key press, so menus and weapon swaps stay reliable.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.pressed = new Set();
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.dragDX = 0;
+    this.dragDY = 0;
+    this.dragging = false;
+    this.wheel = 0;
+    this.mouseDown = false;
+    this.mouseClicked = false;
+    this.anyKey = false;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this.pressed.add(e.code);
+      this.anyKey = true;
+      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => { this.keys.clear(); this.dragging = false; });
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+    canvas.addEventListener('mousedown', (e) => {
+      this.dragging = true; this.mouseDown = true; this.mouseClicked = true;
+      this.mouseX = e.clientX; this.mouseY = e.clientY;
+    });
+    window.addEventListener('mouseup', () => { this.dragging = false; this.mouseDown = false; });
+    window.addEventListener('mousemove', (e) => {
+      if (this.dragging) {
+        this.dragDX += e.clientX - this.mouseX;
+        this.dragDY += e.clientY - this.mouseY;
+      }
+      this.mouseX = e.clientX; this.mouseY = e.clientY;
+    });
+    canvas.addEventListener('wheel', (e) => { this.wheel += e.deltaY; e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  down(code) { return this.keys.has(code); }
+  wasPressed(code) { return this.pressed.has(code); }
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  // Steering: -1 left .. +1 right, from A/D or the arrow keys.
+  steer() {
+    let s = 0;
+    if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
+    if (this.down('KeyD') || this.down('ArrowRight')) s += 1;
+    return s;
+  }
+
+  // Throttle: +1 forward (W / Up), -1 reverse/brake (S / Down).
+  throttle() {
+    let t = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) t += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) t -= 1;
+    return t;
+  }
+
+  // Consume this frame's edge events after the game has read them.
+  endFrame() {
+    this.pressed.clear();
+    this.dragDX = 0;
+    this.dragDY = 0;
+    this.wheel = 0;
+    this.mouseClicked = false;
+    this.anyKey = false;
+  }
 }
