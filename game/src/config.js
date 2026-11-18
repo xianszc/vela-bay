@@ -32,18 +32,18 @@ export const WATERS = [
 ];
 
 export const HUES = {
-  skyTop: 0x9a8fc8, // soft mauve-violet overhead, like a late-afternoon sky
-  skyHorizon: 0xffb37a, // pale orange at the horizon, never red
-  skyBand: 0xffc9a8, // pale peach-pink band just above the sun
-  haze: 0xf2c49c, // warm peach haze that softens the far city
-  sun: 0xffe3ae,
+  skyTop: 0x8a76c0, // deep violet-purple overhead, like the Marisol sky
+  skyHorizon: 0xff9eb8, // soft pink at the horizon — pink, never yellow
+  skyBand: 0xffb3d6, // pink-lavender band just above the sun
+  haze: 0xe8a8c0, // soft rose haze that softens the far city
+  sun: 0xffe9cf, // soft warm sun disc, a pale glow not a yellow ball
   ground: 0x615a52,
-  walk: 0x8d8296,
+  walk: 0x9a8ab0,
   asphalt: 0x23202e,
   lane: 0xf5c542,
-  sand: 0xe8c98f,
-  sea: 0x1e6f8e,
-  seaDeep: 0x166b8f,
+  sand: 0xe8b89a, // pinkish sand, not yellow
+  sea: 0x0e7a9e, // rich vivid turquoise, like the Halcyon bay
+  seaDeep: 0x0e5a9e,
   heroTeal: 0x14e0c8,
   copWhite: 0xf2f2ee,
   copBlack: 0x14161f,

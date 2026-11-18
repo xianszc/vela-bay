@@ -66,6 +66,36 @@ export function windowsCanvas(rng, base, litRatio, palette = 'warm') {
   return c;
 }
 
+// A canvas texture of tall vertical window strips, for New York-style
+// towers (Empire State, Chrysler): narrow lit columns running the full
+// height of the shaft, so the tower reads as an art-deco skyscraper
+// instead of a plain glass box. palette: 'warm' or 'cool'.
+export function stripWindowsCanvas(rng, base, litRatio, palette = 'warm') {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 128, 256);
+  const warm = ['#ffd27a', '#ffb020', '#ffe9a8', '#9fd8ff'];
+  const cool = ['#9fd8ff', '#cfe8ff', '#ffd27a', '#7fb8e8'];
+  const lit = palette === 'cool' ? cool : warm;
+  // Vertical strips: a column of small windows every 16 px across,
+  // unbroken from the base to the crown.
+  for (let x = 6; x < 124; x += 16) {
+    for (let y = 6; y < 250; y += 18) {
+      if (rng() < litRatio) {
+        g.fillStyle = choose(rng, lit);
+        g.globalAlpha = 0.7 + rng() * 0.3;
+      } else {
+        g.fillStyle = '#1c2033';
+        g.globalAlpha = 0.9;
+      }
+      g.fillRect(x, y, 8, 11);
+    }
+  }
+  g.globalAlpha = 1;
+  return c;
+}
+
 // A face for a low-poly character's head: eyes, brows and a smile drawn
 // on a skin-coloured canvas, so the character reads as a person with an
 // expression instead of a blank box. mood: 'smile' | 'grin' | 'calm'.

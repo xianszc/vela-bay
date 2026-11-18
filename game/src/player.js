@@ -1,83 +1,195 @@
-// The player on foot: a low-poly character built from boxes, with a
-// simple walk-cycle swing, and the third-person chase camera that follows
-// whoever the player is — on foot, in a car or in a boat. The camera
-// orbits when the player drags the mouse and pulls back as the vehicle
-// goes faster.
+// The player on foot: a realistic low-poly human — rounded forms, real
+// proportions, a face with eyes and a smile — with a simple walk-cycle
+// swing, and the third-person chase camera that follows whoever the
+// player is — on foot, in a car or in a boat. The camera orbits when the
+// player drags the mouse and pulls back as the vehicle goes faster.
 
 import * as THREE from 'three';
-import { clampNum, easeTo, turnToward, faceCanvas } from './util.js';
+import { clampNum, easeTo, turnToward } from './util.js';
 
-function limbPiece(w, h, d, color, x, y, z) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
-  m.position.set(x, y, z);
+// ---- realistic human figures -------------------------------------------
+// A person, not a box doll: real proportions (head ~1/7.5 of the 1.8 m
+// height), smooth rounded forms (capsules, spheres, cylinders — never
+// sharp boxes), a face with eyes, nose, a smile and hair, and a jacket
+// and trousers that follow the body. Limbs are two-segment (thigh + shin,
+// upper arm + forearm) with a slight natural bend, so a walk, a wave or
+// a celebration reads as a human moving, not a doll pivoting.
+// The figure faces -Z. buildFigure returns the group plus the leg and
+// arm pivots (Groups at the hips and shoulders) that the walk cycle and
+// the staged poses rotate.
+function rmat(color, opts = {}) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.02, ...opts });
+}
+function capsulePart(r, len, color, opts = {}) {
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 12), rmat(color, opts));
+  m.castShadow = true;
+  return m;
+}
+function ballPart(r, color, opts = {}) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), rmat(color, opts));
+  m.castShadow = true;
+  return m;
+}
+function tubePart(r, h, color, opts = {}, seg = 10) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), rmat(color, opts));
   m.castShadow = true;
   return m;
 }
 
-function skinCss(hex) {
-  return '#' + hex.toString(16).padStart(6, '0');
-}
-
-// mood: 'smile' | 'grin' | 'calm' — the face texture goes on the -Z
-// side of the head box, which is the direction the figure walks toward.
+// mood: 'smile' | 'grin' | 'calm' — sizes the smile.
 // opts.cap: give the figure a driver cap in the shirt colour (Rex).
 export function buildFigure(shirt, pants, skin, mood = 'smile', opts = {}) {
   const g = new THREE.Group();
-  // A jacket in a darker shade of the shirt, open at the chest so the
-  // shirt shows — a real outfit, not a single-colour block.
-  const jacketCol = new THREE.Color(shirt).multiplyScalar(0.5);
-  const torso = limbPiece(0.62, 0.72, 0.34, shirt, 0, 1.18, 0);
+  const jacketCol = new THREE.Color(shirt).multiplyScalar(0.45).getHex();
+  const dark = 0x1a1210;
+
+  // --- torso: a rounded capsule, jacket over a shirt ---
+  const torso = capsulePart(0.19, 0.26, shirt);
+  torso.scale.set(1.18, 1, 0.82);
+  torso.position.set(0, 1.18, 0);
   g.add(torso);
-  g.add(limbPiece(0.66, 0.46, 0.38, jacketCol.getHex(), 0, 1.32, 0));
-  g.add(limbPiece(0.2, 0.3, 0.06, 0xf2ede2, 0, 1.3, -0.22));
-  const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.85 });
-  const faceTex = new THREE.CanvasTexture(faceCanvas(skinCss(skin), mood));
-  const faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.85 });
-  // Box face order: +X, -X, +Y, -Y, +Z, -Z. The face sits on -Z.
-  const head = new THREE.Mesh(
-    new THREE.BoxGeometry(0.42, 0.42, 0.4),
-    [skinMat, skinMat, skinMat, skinMat, skinMat, faceMat],
+  // Jacket: a slightly wider, shorter capsule over the chest, so the
+  // shirt shows below it — a real outfit, not a single-colour block.
+  const jacket = capsulePart(0.21, 0.06, jacketCol);
+  jacket.scale.set(1.18, 1, 0.82);
+  jacket.position.set(0, 1.24, 0);
+  g.add(jacket);
+  // Shirt V on the chest front, poking out of the open jacket.
+  const chest = ballPart(0.13, 0xf2ede2);
+  chest.scale.set(0.9, 1.1, 0.35);
+  chest.position.set(0, 1.28, -0.185);
+  g.add(chest);
+  // Hips / pelvis.
+  const hips = ballPart(0.19, pants);
+  hips.scale.set(1.1, 0.75, 0.9);
+  hips.position.set(0, 0.86, 0);
+  g.add(hips);
+  // Neck, so the head sits on the body instead of floating on it.
+  const neck = tubePart(0.05, 0.1, skin);
+  neck.position.set(0, 1.53, 0);
+  g.add(neck);
+  // Rounded shoulders.
+  for (const sx of [-1, 1]) {
+    const sh = ballPart(0.09, shirt);
+    sh.position.set(sx * 0.24, 1.44, 0);
+    g.add(sh);
+  }
+
+  // --- head: a sphere with a real face ---
+  const head = new THREE.Group();
+  head.position.set(0, 1.66, 0);
+  const skull = ballPart(0.125, skin);
+  head.add(skull);
+  // Hair: a flattened cap over the top-back of the skull.
+  const hair = ballPart(0.132, dark);
+  hair.scale.set(1.0, 0.75, 1.0);
+  hair.position.set(0, 0.035, 0.02);
+  head.add(hair);
+  // Ears.
+  for (const sx of [-1, 1]) {
+    const ear = ballPart(0.028, skin);
+    ear.scale.set(0.5, 1, 0.8);
+    ear.position.set(sx * 0.125, 0, 0);
+    head.add(ear);
+  }
+  // Eyes: dark spheres set into the face, with a white glint.
+  for (const sx of [-1, 1]) {
+    const eye = ballPart(0.02, dark);
+    eye.position.set(sx * 0.048, 0.02, -0.112);
+    head.add(eye);
+    const glint = ballPart(0.007, 0xffffff);
+    glint.position.set(sx * 0.048 + 0.006, 0.028, -0.128);
+    head.add(glint);
+  }
+  // Eyebrows.
+  for (const sx of [-1, 1]) {
+    const brow = ballPart(0.022, dark);
+    brow.scale.set(1.6, 0.45, 0.5);
+    brow.position.set(sx * 0.048, 0.055, -0.115);
+    head.add(brow);
+  }
+  // Nose: a small rounded cone pointing forward.
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.05, 8), rmat(skin));
+  nose.rotation.x = -Math.PI / 2 - 0.35;
+  nose.position.set(0, -0.015, -0.125);
+  nose.castShadow = true;
+  head.add(nose);
+  // Smile: a thin torus arc — a real mouth curve, not a painted line.
+  const smileR = mood === 'grin' ? 0.045 : mood === 'calm' ? 0.028 : 0.038;
+  const smile = new THREE.Mesh(
+    new THREE.TorusGeometry(smileR, 0.007, 8, 20, Math.PI),
+    rmat(0x6a2a1a, { roughness: 0.6 }),
   );
-  head.position.set(0, 1.78, 0);
-  head.castShadow = true;
-  g.add(head);
-  // A neck, so the head sits on the body instead of floating on it.
-  g.add(limbPiece(0.16, 0.14, 0.16, skin, 0, 1.58, 0));
-  const hair = limbPiece(0.46, 0.16, 0.44, 0x1a1210, 0, 2.02, 0);
-  g.add(hair);
+  smile.rotation.z = Math.PI; // lower half = a smile curve
+  smile.position.set(0, -0.055, -0.118);
+  head.add(smile);
+  // Blush on the cheeks.
+  for (const sx of [-1, 1]) {
+    const blush = ballPart(0.02, 0xff8a8a);
+    blush.scale.set(1.2, 0.7, 0.4);
+    blush.position.set(sx * 0.075, -0.03, -0.12);
+    head.add(blush);
+  }
   if (opts.cap) {
-    // A driver cap in the shirt colour, with a brim over the face.
-    g.add(limbPiece(0.46, 0.1, 0.44, shirt, 0, 2.08, 0));
-    g.add(limbPiece(0.42, 0.05, 0.2, shirt, 0, 2.04, -0.28));
+    // A driver cap in the shirt colour, with a brim over the forehead.
+    const capTop = tubePart(0.14, 0.05, shirt, {}, 14);
+    capTop.position.set(0, 0.115, 0.01);
+    head.add(capTop);
+    const brim = ballPart(0.09, shirt);
+    brim.scale.set(1.3, 0.25, 1.0);
+    brim.position.set(0, 0.07, -0.095);
+    head.add(brim);
   }
-  const legs = {
-    left: limbPiece(0.24, 0.8, 0.26, pants, -0.17, 0.4, 0),
-    right: limbPiece(0.24, 0.8, 0.26, pants, 0.17, 0.4, 0),
-  };
-  legs.left.geometry.translate(0, -0.4, 0);
-  legs.left.position.y = 0.8;
-  legs.right.geometry.translate(0, -0.4, 0);
-  legs.right.position.y = 0.8;
-  g.add(legs.left, legs.right);
-  // Shoes at the end of each leg.
-  for (const leg of [legs.left, legs.right]) {
-    const shoe = limbPiece(0.26, 0.1, 0.38, 0x1a1210, 0, -0.76, -0.05);
-    leg.add(shoe);
+  g.add(head);
+
+  // --- legs: thigh + shin + shoe, pivoting at the hip ---
+  function makeLeg(side) {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.11, 0.84, 0);
+    const thigh = capsulePart(0.085, 0.3, pants);
+    thigh.position.y = -0.2;
+    hip.add(thigh);
+    const knee = new THREE.Group();
+    knee.position.y = -0.4;
+    const shin = capsulePart(0.07, 0.3, pants);
+    shin.position.y = -0.2;
+    knee.add(shin);
+    const shoe = ballPart(0.09, dark);
+    shoe.scale.set(0.9, 0.55, 1.5);
+    shoe.position.set(0, -0.38, -0.04);
+    knee.add(shoe);
+    // A slight natural knee bend so the leg never looks like a stiff rod.
+    knee.rotation.x = 0.12;
+    hip.add(knee);
+    g.add(hip);
+    return hip;
   }
-  const arms = {
-    left: limbPiece(0.2, 0.66, 0.22, shirt, -0.42, 1.42, 0),
-    right: limbPiece(0.2, 0.66, 0.22, shirt, 0.42, 1.42, 0),
-  };
-  arms.left.geometry.translate(0, -0.3, 0);
-  arms.left.position.y = 1.5;
-  arms.right.geometry.translate(0, -0.3, 0);
-  arms.right.position.y = 1.5;
-  g.add(arms.left, arms.right);
-  // Hands at the end of each arm, so a wave or a celebration reads.
-  for (const arm of [arms.left, arms.right]) {
-    const hand = limbPiece(0.16, 0.16, 0.16, skin, 0, -0.68, 0);
-    arm.add(hand);
+  const legs = { left: makeLeg(-1), right: makeLeg(1) };
+
+  // --- arms: upper arm + forearm + hand, pivoting at the shoulder ---
+  function makeArm(side) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.27, 1.44, 0);
+    const upper = capsulePart(0.06, 0.22, shirt);
+    upper.position.y = -0.15;
+    shoulder.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.3;
+    const fore = capsulePart(0.052, 0.2, shirt);
+    fore.position.y = -0.14;
+    elbow.add(fore);
+    const hand = ballPart(0.06, skin);
+    hand.scale.set(0.85, 1.1, 0.9);
+    hand.position.y = -0.3;
+    elbow.add(hand);
+    // A relaxed natural elbow bend.
+    elbow.rotation.x = -0.28;
+    shoulder.add(elbow);
+    g.add(shoulder);
+    return shoulder;
   }
+  const arms = { left: makeArm(-1), right: makeArm(1) };
+
   return { group: g, legs, arms };
 }
 
