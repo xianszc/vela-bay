@@ -170,3 +170,59 @@ export function glowCanvas(inner, outer) {
   g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
   return c;
 }
+
+// A crisp sun disc: a vivid golden-orange core with a hard edge that
+// softens into a warm rim, so the sun reads as a big round disc like
+// the Halcyon title — not a fuzzy blob. The colours are deliberately
+// vivid and saturated, so the disc stands out against the pale warm
+// sky glow around it instead of blending in. Used as a sprite, so it
+// always faces the camera and never shears into a triangle at a
+// glancing angle.
+export function sunDiscCanvas() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 10, 128, 128, 126);
+  grad.addColorStop(0, '#ffe14a');
+  grad.addColorStop(0.5, '#ffc21c');
+  grad.addColorStop(0.7, '#ff8f0a');
+  grad.addColorStop(0.82, 'rgba(255,120,10,0.9)');
+  grad.addColorStop(1, 'rgba(255,120,10,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
+  return c;
+}
+
+// A striped awning texture: horizontal bands of two colours, so the
+// stripes run from the wall down to the street edge when the canvas is
+// laid flat as an awning — like the purple-and-white striped awnings
+// on the Marisol seafront shops.
+export function stripedAwningCanvas(colorA, colorB) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  for (let y = 0; y < 64; y += 16) {
+    g.fillStyle = (y / 16) % 2 === 0 ? colorA : colorB;
+    g.fillRect(0, y, 128, 16);
+  }
+  g.fillStyle = 'rgba(0,0,0,0.12)';
+  g.fillRect(0, 52, 128, 12);
+  return c;
+}
+
+// A tall vertical sign: letters stacked top to bottom, like the neon
+// "MIRAGE" blade sign on the Marisol seafront. Drawn on a dark blade
+// with a bright border, so it reads from down the street.
+export function verticalSignCanvas(word, fg, bg) {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 64, 256);
+  g.strokeStyle = fg; g.lineWidth = 4; g.strokeRect(4, 4, 56, 248);
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = 'bold 30px Arial, sans-serif';
+  const letters = word.split('');
+  letters.forEach((ch, i) => {
+    g.fillText(ch, 32, 22 + i * (212 / Math.max(1, letters.length - 1)));
+  });
+  return c;
+}

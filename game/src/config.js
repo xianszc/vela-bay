@@ -32,11 +32,12 @@ export const WATERS = [
 ];
 
 export const HUES = {
-  skyTop: 0x8a76c0, // deep violet-purple overhead, like the Marisol sky
+  skyTop: 0x6a4a9e, // deep violet-purple overhead, like the Marisol sky
   skyHorizon: 0xff9eb8, // soft pink at the horizon — pink, never yellow
-  skyBand: 0xffb3d6, // pink-lavender band just above the sun
-  haze: 0xe8a8c0, // soft rose haze that softens the far city
-  sun: 0xffe9cf, // soft warm sun disc, a pale glow not a yellow ball
+  skyBand: 0xc87ab8, // purple-pink band between the violet top and the pink horizon
+  skyWarm: 0xffb36b, // warm peach-orange glow near the sun, like the Halcyon horizon
+  haze: 0xf0a890, // warm peach-rose haze that softens the far city
+  sun: 0xffc93c, // big golden yellow-orange sun disc, like the Halcyon sun
   ground: 0x615a52,
   walk: 0x9a8ab0,
   asphalt: 0x23202e,

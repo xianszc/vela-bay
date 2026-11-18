@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { TOWN, HUES, WATERS } from './config.js';
-import { rng32, choose, between, intBetween, windowsCanvas, stripWindowsCanvas, signCanvas, glowCanvas } from './util.js';
+import { rng32, choose, between, intBetween, windowsCanvas, stripWindowsCanvas, signCanvas, glowCanvas, sunDiscCanvas, stripedAwningCanvas, verticalSignCanvas } from './util.js';
 
 const shadeCache = new Map();
 function shade(color, opts = {}) {
@@ -130,8 +130,27 @@ function lampPost() {
   return g;
 }
 
+// A seafront balcony: a thin floor slab and a low railing, like the
+// balconies on the Marisol coastal buildings. Sticks out from the face
+// it is placed on, so a flat facade gains real depth.
+function balcony(width, color) {
+  const g = new THREE.Group();
+  const slab = block(width, 0.3, 1.6, color);
+  slab.position.set(0, 0, 0.8);
+  g.add(slab);
+  const rail = block(width, 0.9, 0.12, 0x2a2d3a);
+  rail.position.set(0, 0.6, 1.55);
+  g.add(rail);
+  return g;
+}
+
 export function buildTown(scene) {
   const rng = rng32(TOWN.seed);
+  // A separate stream for the v5 decorative details (balcony colours,
+  // striped awnings, blade signs), so they never consume from the main
+  // stream and the seeded town layout — building spots, parked cars,
+  // trees — stays exactly as it was.
+  const decorRng = rng32(TOWN.seed + 777);
   const colliders = [];
   const parkedCars = [];
   const animated = { waterMats: [], ferris: null, clouds: [], heliPad: null };
@@ -139,6 +158,16 @@ export function buildTown(scene) {
   const sidewalkSpots = [];
 
   // ---- sky, sun, fog, light -------------------------------------------
+  // A rich sunset sky like the references: deep violet overhead (Marisol),
+  // purple-pink in the middle, soft pink at the horizon, and a warm
+  // peach-orange glow that pools around the sun (Halcyon) — so the sky
+  // reads as a real sunset from any angle, never a flat pink wash.
+  // The sun sits north-west, upper-left in the north-looking title,
+  // chase and end shots like the Halcyon sun — inside the frame, clear
+  // of the skyline towers, and high enough that its light clears the
+  // downtown rooftops instead of hiding behind them.
+  const SUN_POS = new THREE.Vector3(-160, 181, -411);
+  const SUN_DIR = SUN_POS.clone().normalize();
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -147,30 +176,47 @@ export function buildTown(scene) {
       top: { value: new THREE.Color(HUES.skyTop) },
       mid: { value: new THREE.Color(HUES.skyBand) },
       horizon: { value: new THREE.Color(HUES.skyHorizon) },
+      warm: { value: new THREE.Color(HUES.skyWarm) },
+      sunDir: { value: SUN_DIR },
     },
     vertexShader: `
       varying vec3 vPos;
       void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `
-      varying vec3 vPos; uniform vec3 top; uniform vec3 mid; uniform vec3 horizon;
+      varying vec3 vPos; uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 warm; uniform vec3 sunDir;
       void main() {
-        float h = normalize(vPos).y;
-        vec3 c = h > 0.25 ? mix(mid, top, smoothstep(0.25, 0.8, h))
-                          : mix(horizon, mid, smoothstep(-0.05, 0.25, h));
+        vec3 dir = normalize(vPos);
+        float h = dir.y;
+        // Four-stop vertical gradient: violet top, purple-pink middle,
+        // soft pink horizon, warm peach at the very bottom of the sky.
+        vec3 c = h > 0.35 ? mix(mid, top, smoothstep(0.35, 0.85, h))
+                : h > 0.08 ? mix(horizon, mid, smoothstep(0.08, 0.35, h))
+                : mix(warm, horizon, smoothstep(-0.05, 0.08, h));
+        // Warm glow around the sun: the sky near the sun burns peach and
+        // gold, fading to the pink-violet gradient away from it.
+        float glow = pow(max(dot(dir, sunDir), 0.0), 4.0);
+        c = mix(c, warm, glow * 0.75);
+        // A faint bright core right at the sun, so the glow feels lit —
+        // kept dimmer than the sun disc itself, so the disc still reads
+        // as a distinct circle against the glow.
+        float core = pow(max(dot(dir, sunDir), 0.0), 24.0);
+        c = mix(c, vec3(1.0, 0.85, 0.55), core * 0.55);
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), skyMat);
   scene.add(sky);
 
-  scene.fog = new THREE.Fog(HUES.haze, 180, 850);
+  scene.fog = new THREE.Fog(HUES.haze, 180, 900);
 
-  // Low late-afternoon sun (elevation ~15 deg) so buildings, trees, cars
-  // and characters throw long, soft, clearly readable shadows across the
-  // streets, like a real afternoon photograph. Rose-gold light, not
-  // yellow — the sky reads pink-violet, so the light must match.
-  const sun = new THREE.DirectionalLight(0xffb8a8, 3.0);
-  sun.position.set(-330, 92, 165);
+  // Low late-afternoon sun in the north-west, over the city skyline —
+  // so the big sun sits in the frame of the north-looking title, chase
+  // and end cameras, upper-left like the Halcyon title. Warm peach
+  // light, so buildings, trees, cars and characters throw long, soft,
+  // clearly readable shadows across the streets, like a real afternoon
+  // photograph.
+  const sun = new THREE.DirectionalLight(0xffc8a0, 3.0);
+  sun.position.set(-200, 120, -600);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -240; sun.shadow.camera.right = 240;
@@ -179,36 +225,44 @@ export function buildTown(scene) {
   sun.shadow.camera.far = 900;
   sun.shadow.bias = -0.0006;
   scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xa8c8e0, 0x7a5a44, 1.3));
-  const fill = new THREE.DirectionalLight(0x8fb8dd, 0.55);
-  fill.position.set(200, 140, -160);
+  scene.add(new THREE.HemisphereLight(0xc8a8d8, 0x8a6a54, 1.3));
+  // Warm bounce light from the south, off the sunlit bay — so Rex, the
+  // hero car and every south-facing facade stay warmly lit even though
+  // the sun itself sits behind them in the north-west.
+  const fill = new THREE.DirectionalLight(0xffc0a0, 0.7);
+  fill.position.set(100, 90, 300);
   scene.add(fill);
 
-  // The sun disc itself — a big, low, warm disc over the bay in the late
-  // afternoon, plus a soft halo sprite.
-  const sunDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(46, 32),
-    new THREE.MeshBasicMaterial({ color: HUES.sun, fog: false }),
-  );
-  sunDisc.position.set(-380, 80, 420);
-  sunDisc.lookAt(0, 40, 0);
+  // The sun itself: a big golden disc, rendered as a sprite so it is
+  // always round from any camera (a flat circle shears into a thin
+  // triangle at a glancing angle), plus a broad warm halo. The disc sits
+  // north-west over the skyline, upper-left in the title and chase
+  // shots, like the Halcyon sun.
+  const sunDisc = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(sunDiscCanvas()), fog: false, transparent: true, depthWrite: false }));
+  sunDisc.scale.set(150, 150, 1);
+  sunDisc.position.copy(SUN_POS);
+  sunDisc.renderOrder = 2; // the crisp disc draws on top of the halo
   scene.add(sunDisc);
-  const glowTex = new THREE.CanvasTexture(glowCanvas('rgba(255,196,214,0.85)', 'rgba(255,150,180,0)'));
+  const glowTex = new THREE.CanvasTexture(glowCanvas('rgba(255,180,90,0.75)', 'rgba(255,140,80,0)'));
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, transparent: true, depthWrite: false }));
-  halo.scale.set(320, 320, 1);
-  halo.position.copy(sunDisc.position);
+  halo.scale.set(450, 450, 1);
+  halo.position.copy(SUN_POS);
+  halo.renderOrder = 1;
   scene.add(halo);
 
-  // Drifting clouds, pink in the afternoon light.
+  // Drifting clouds, soft white-pink in the afternoon light, a few of
+  // them catching the warm glow near the sun. (Kept at nine clouds with
+  // the v4 random calls, so the seeded town layout after them is
+  // unchanged — only their size and spacing grew.)
   for (let i = 0; i < 9; i++) {
     const cloud = new THREE.Group();
     const puffs = intBetween(rng, 3, 5);
     for (let p = 0; p < puffs; p++) {
       const s = new THREE.Mesh(
-        new THREE.SphereGeometry(between(rng, 7, 16), 8, 6),
-        new THREE.MeshStandardMaterial({ color: 0xffe0ea, roughness: 1, transparent: true, opacity: 0.85, emissive: 0xc07090, emissiveIntensity: 0.3 }),
+        new THREE.SphereGeometry(between(rng, 9, 18), 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0xfff0f5, roughness: 1, transparent: true, opacity: 0.9, emissive: 0xd08090, emissiveIntensity: 0.35 }),
       );
-      s.position.set(p * 12 - puffs * 6, between(rng, -2, 3), between(rng, -4, 4));
+      s.position.set(p * 14 - puffs * 7, between(rng, -2, 3), between(rng, -4, 4));
       s.scale.y = 0.45;
       cloud.add(s);
     }
@@ -318,13 +372,14 @@ export function buildTown(scene) {
   // Fourteen facades, four window styles and three height bands, so no
   // two blocks look alike: low shops with awnings, mid flats, tall
   // office slabs, each with its own window pattern and rooftop clutter.
-  // Eighteen vivid facades — hot pink, coral, bold yellow, teal, sky
-  // blue, purple, mint — so the city reads colourful and alive like the
-  // references, with warm neutrals for balance. No two blocks look alike.
+  // Coastal seafront facades like the Marisol references: warm cream,
+  // soft pink, teal, white, coral, pale yellow and sky blue — so the
+  // city reads as a colourful beach town, not a grey office district.
+  // No two blocks look alike.
   const facadeColors = [
-    0xff5e8a, 0xff8a5e, 0xffb020, 0x14d8c8, 0x4aa8e8, 0x9a6ad8,
-    0x6ad8a8, 0xff6a5e, 0xe8dcc8, 0xd8a08a, 0x9fc8c0, 0xe8b88a,
-    0xc8b8d8, 0xa8c8e8, 0xffc0d8, 0x8fd8a8, 0xffd27a, 0x7a9cc8,
+    0xf2e8d8, 0xffb8c8, 0x4ad8c8, 0xf8f8f0, 0xff8a7a, 0xffd88a,
+    0x8fc8e8, 0xd8c8e8, 0xa8d8b8, 0xffc8a8, 0xff7a9e, 0x6ac8d8,
+    0xe8d0b8, 0xc8e8d8, 0xffa8b8, 0x9fd8e8, 0xf0c8a8, 0x7ab8d8,
   ];
   const windowStyles = [
     { base: '#3a3348', lit: 0.55, palette: 'warm' },
@@ -332,7 +387,6 @@ export function buildTown(scene) {
     { base: '#4a4038', lit: 0.35, palette: 'warm' },
     { base: '#1e2a3a', lit: 0.5, palette: 'cool' },
   ];
-  const awningColors = [0xff7ab8, 0x14e0c8, 0xffb020, 0xff5e5e, 0x9fd8ff, 0x8fd8a8, 0xb06ad8, 0xff8a3c];
   const signTexts = [
     ['VELA', 'GRAND CASINO'], ['HOTEL', 'LUNA'], ['TIDE', 'MARKET'],
     ['PALM', 'COURT'], ['SUNSET', 'MOTEL'], ['MARINA', 'YACHT CLUB'],
@@ -395,6 +449,21 @@ export function buildTown(scene) {
         faces.position.set(bx, h / 2, bz);
         faces.castShadow = true; faces.receiveShadow = true;
         scene.add(faces);
+        // Seafront balconies on mid-rise buildings, like the Marisol
+        // coastal flats: two per floor above the ground floor, on the
+        // street-facing side, so the facade has real depth instead of a
+        // flat printed wall.
+        if (h >= 12 && h <= 30) {
+          const floors = Math.floor(h / 5);
+          const balColor = choose(decorRng, [0xf8f8f0, 0x2a2d3a, 0x8a6a4a, 0x4ad8c8]);
+          for (let f = 1; f < floors; f++) {
+            for (const off of [-w / 4, w / 4]) {
+              const bal = balcony(Math.min(5, w * 0.3), balColor);
+              bal.position.set(bx + off, f * 5, bz + d / 2);
+              scene.add(bal);
+            }
+          }
+        }
         // A setback crown on the tallest slabs, so the skyline steps.
         if (h > 30) {
           const crown = block(w * 0.55, 3.5, d * 0.55, color);
@@ -422,9 +491,17 @@ export function buildTown(scene) {
         // Low shops get a striped awning and a small shop sign over the
         // door, so the street level reads as storefronts, not blank walls.
         if (h <= 12) {
-          const awn = block(w * 0.7, 0.25, 2.2, choose(rng, awningColors));
+          // A striped awning, purple-and-white or teal-and-white like the
+          // Marisol seafront shops — a tilted plane with a striped canvas.
+          const stripePair = choose(rng, [['#b06ad8', '#ffffff'], ['#14d8c8', '#ffffff'], ['#ff7ab8', '#ffffff'], ['#ffb020', '#ffffff']]);
+          const awnTex = new THREE.CanvasTexture(stripedAwningCanvas(stripePair[0], stripePair[1]));
+          const awn = new THREE.Mesh(
+            new THREE.PlaneGeometry(w * 0.7, 2.2),
+            new THREE.MeshStandardMaterial({ map: awnTex, roughness: 0.9, side: THREE.DoubleSide }),
+          );
           awn.position.set(bx, 3.4, bz + d / 2 + 1.0);
-          awn.rotation.x = 0.25;
+          awn.rotation.x = -Math.PI / 2 + 0.25;
+          awn.castShadow = true;
           scene.add(awn);
           const shopWord = choose(rng, ['CAFE', 'TACOS', 'SURF SHOP', 'BAR', 'PIZZA', 'FLOWERS']);
           const shopTex = new THREE.CanvasTexture(signCanvas([shopWord], '#fff', '#241a33'));
@@ -437,6 +514,22 @@ export function buildTown(scene) {
           );
           shopSign.position.set(bx, 4.8, bz + d / 2 + 0.15);
           scene.add(shopSign);
+        }
+        // A tall vertical blade sign on some mid-rise buildings, like the
+        // neon "MIRAGE" blade on the Marisol seafront — it reads from
+        // down the street and gives the facade a landmark.
+        if (h > 12 && h <= 30 && decorRng() < 0.35) {
+          const bladeWord = choose(decorRng, ['VELA', 'LUNA', 'TIDE', 'PALM', 'SOL', 'MARINA']);
+          const bladeTex = new THREE.CanvasTexture(verticalSignCanvas(bladeWord, '#ffd27a', '#241a33'));
+          const blade = new THREE.Mesh(
+            new THREE.PlaneGeometry(2.2, 9),
+            new THREE.MeshStandardMaterial({
+              map: bladeTex, emissive: 0xffffff, emissiveMap: bladeTex,
+              emissiveIntensity: 0.7, side: THREE.DoubleSide,
+            }),
+          );
+          blade.position.set(bx + w / 2 + 0.3, h * 0.6, bz + d / 2 + 0.3);
+          scene.add(blade);
         }
         // A neon sign on some taller buildings.
         if (h > 22 && signIndex < signTexts.length && rng() < 0.6) {
@@ -464,16 +557,18 @@ export function buildTown(scene) {
     }
   }
 
-  // ---- the distant CBD skyline: New York City ---------------------------
-  // A New York skyline far north of the grid, so it reads on the horizon
-  // from downtown and from the title camera. Three landmark towers in the
-  // Empire State / Chrysler / One World Trade Center manner — stepped
-  // setbacks, art-deco crowns, spires — plus a row of varied setback
-  // towers in limestone, brick and glass. Their windows glow, so they
-  // cut through the afternoon haze instead of washing out.
-  function nycTower(x, z, spec) {
-    // Stacks the tiers (each narrower than the one below — the classic
-    // NYC setback), then finishes with the crown.
+  // ---- the distant coastal skyline ---------------------------------------
+  // A seafront skyline far north of the grid, like the Halcyon Keys
+  // background: tall slim towers in hazy pastel colours, spread out
+  // along the horizon with varied heights, so they read as a beach
+  // city's skyline instead of a dense downtown. Their windows glow, so
+  // they cut through the afternoon haze instead of washing out. The
+  // western stretch is left open, so the big sun sits clear of the
+  // towers in the title and chase shots.
+  function coastalTower(x, z, spec) {
+    // A slim slab, optionally with a narrower top slab, then a small
+    // crown: a thin antenna with a red beacon, a slim spire, or a flat
+    // roof.
     let y = 0;
     for (const t of spec.tiers) {
       const winTex = new THREE.CanvasTexture(stripWindowsCanvas(rng, spec.base, 0.62, spec.palette || 'warm'));
@@ -493,54 +588,7 @@ export function buildTown(scene) {
       scene.add(tier);
       y += t.h;
     }
-    const topW = spec.tiers[spec.tiers.length - 1].w;
-    const topD = spec.tiers[spec.tiers.length - 1].d;
-    if (spec.crown === 'spire') {
-      // A tall mooring-mast spire, Empire State style.
-      const mast = tube(0.6, 1.6, 18, spec.accent || 0x8a7a62, {}, 8);
-      mast.position.set(x, y + 9, z);
-      scene.add(mast);
-      const tip = tube(0.15, 0.3, 10, 0x2a2d3a, {}, 6);
-      tip.position.set(x, y + 22, z);
-      scene.add(tip);
-      const beacon = new THREE.Mesh(
-        new THREE.SphereGeometry(0.9, 8, 6),
-        new THREE.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 2.5 }),
-      );
-      beacon.position.set(x, y + 27.5, z);
-      scene.add(beacon);
-    } else if (spec.crown === 'artdeco') {
-      // A stepped art-deco crown, Chrysler style: three narrowing
-      // terraces in bright steel, then a pointed spire.
-      let cy = y;
-      let cw = topW * 0.85, cd = topD * 0.85;
-      for (let i = 0; i < 3; i++) {
-        const step = block(cw, 5, cd, 0xd8d8e0, { metalness: 0.5, roughness: 0.35 });
-        step.position.set(x, cy + 2.5, z);
-        scene.add(step);
-        cy += 5; cw *= 0.72; cd *= 0.72;
-      }
-      const point = new THREE.Mesh(
-        new THREE.ConeGeometry(Math.max(1.2, cw * 0.9), 16, 8),
-        new THREE.MeshStandardMaterial({ color: 0xe8e8f0, metalness: 0.6, roughness: 0.3 }),
-      );
-      point.position.set(x, cy + 8, z);
-      point.castShadow = true;
-      scene.add(point);
-    } else if (spec.crown === 'taper') {
-      // A glass crown that tapers to a point, One World Trade Center style.
-      const cap = new THREE.Mesh(
-        new THREE.ConeGeometry(Math.max(2, topW * 0.55), 22, 4),
-        new THREE.MeshStandardMaterial({ color: 0x9fd8ff, metalness: 0.5, roughness: 0.25, emissive: 0x9fd8ff, emissiveIntensity: 0.25 }),
-      );
-      cap.position.set(x, y + 11, z);
-      cap.rotation.y = Math.PI / 4;
-      cap.castShadow = true;
-      scene.add(cap);
-      const spire = tube(0.25, 0.5, 26, 0x2a2d3a, {}, 6);
-      spire.position.set(x, y + 35, z);
-      scene.add(spire);
-    } else if (spec.crown === 'antenna') {
+    if (spec.crown === 'antenna') {
       const ant = tube(0.18, 0.3, 12, 0x2a2d3a, {}, 6);
       ant.position.set(x, y + 6, z);
       scene.add(ant);
@@ -550,54 +598,46 @@ export function buildTown(scene) {
       );
       beacon.position.set(x, y + 12.5, z);
       scene.add(beacon);
+    } else if (spec.crown === 'spire') {
+      // A slim spire, like the rooftop masts on the Halcyon towers.
+      const mast = tube(0.4, 1.0, 16, 0x8a7a62, {}, 8);
+      mast.position.set(x, y + 8, z);
+      scene.add(mast);
+      const beacon = new THREE.Mesh(
+        new THREE.SphereGeometry(0.8, 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 2.5 }),
+      );
+      beacon.position.set(x, y + 16.5, z);
+      scene.add(beacon);
     }
+    // 'flat' needs no crown — the slab's roof is the top.
     const baseW = spec.tiers[0].w, baseD = spec.tiers[0].d;
     colliders.push({ x0: x - baseW / 2, x1: x + baseW / 2, z0: z - baseD / 2, z1: z + baseD / 2 });
   }
   {
-    // Landmark towers (hand-placed, tallest of the cluster).
-    // Empire State manner: limestone, four setback tiers, mooring spire.
-    nycTower(-72, -330, {
-      base: '#8a7a62', palette: 'warm', crown: 'spire', accent: 0x8a7a62,
-      tiers: [
-        { w: 34, d: 30, h: 95 }, { w: 27, d: 24, h: 62 },
-        { w: 20, d: 18, h: 44 }, { w: 13, d: 12, h: 30 },
-      ],
-    });
-    // Chrysler manner: warm brick-steel shaft, stepped art-deco crown.
-    nycTower(24, -345, {
-      base: '#9a8a7a', palette: 'warm', crown: 'artdeco',
-      tiers: [
-        { w: 28, d: 26, h: 88 }, { w: 22, d: 20, h: 56 },
-        { w: 16, d: 15, h: 38 },
-      ],
-    });
-    // One World Trade Center manner: tapering blue glass, tall spire.
-    nycTower(120, -325, {
-      base: '#16222e', palette: 'cool', crown: 'taper',
-      tiers: [
-        { w: 30, d: 30, h: 100 }, { w: 24, d: 24, h: 66 },
-        { w: 18, d: 18, h: 46 },
-      ],
-    });
-    // A row of varied setback towers filling the skyline between them.
-    const nycFill = [
-      { x: -210, z: -330, w: 22, h: 120, base: '#7a6a5a', palette: 'warm', crown: 'antenna' },
-      { x: -168, z: -352, w: 20, h: 150, base: '#a85848', palette: 'warm', crown: 'antenna' },
-      { x: -126, z: -322, w: 24, h: 105, base: '#3a3a48', palette: 'cool', crown: 'antenna' },
-      { x: -30, z: -360, w: 20, h: 140, base: '#8a7a62', palette: 'warm', crown: 'antenna' },
-      { x: 66, z: -330, w: 22, h: 118, base: '#16222e', palette: 'cool', crown: 'antenna' },
-      { x: 168, z: -350, w: 20, h: 160, base: '#6a5a4a', palette: 'warm', crown: 'spire', accent: 0x6a5a4a },
-      { x: 204, z: -325, w: 18, h: 100, base: '#2a4a6a', palette: 'cool', crown: 'antenna' },
-      { x: -186, z: -378, w: 18, h: 92, base: '#8a7a62', palette: 'warm', crown: 'antenna' },
-      { x: 150, z: -378, w: 18, h: 96, base: '#a85848', palette: 'warm', crown: 'antenna' },
-      { x: 0, z: -382, w: 20, h: 128, base: '#3a3a48', palette: 'cool', crown: 'antenna' },
+    // Hand-placed coastal towers, tallest of the skyline. Slim pastel
+    // slabs with lit windows — the Halcyon Keys background skyline, not
+    // a downtown cluster. The western stretch stays open so the big sun
+    // sits clear of the towers, upper-left like the Halcyon title.
+    const skyline = [
+      { x: -60, z: -335, w: 18, h: 120, base: '#f2e8d8', palette: 'warm', crown: 'flat' },
+      { x: -20, z: -360, w: 16, h: 150, base: '#ffc8d8', palette: 'warm', crown: 'antenna' },
+      { x: 20, z: -330, w: 20, h: 190, base: '#a8c8e8', palette: 'cool', crown: 'spire' },
+      { x: 60, z: -355, w: 18, h: 130, base: '#f8f8f0', palette: 'warm', crown: 'flat' },
+      { x: 100, z: -335, w: 16, h: 165, base: '#8fc8e8', palette: 'cool', crown: 'antenna' },
+      { x: 140, z: -365, w: 20, h: 200, base: '#ffd88a', palette: 'warm', crown: 'spire' },
+      { x: 180, z: -330, w: 16, h: 120, base: '#d8c8e8', palette: 'warm', crown: 'flat' },
+      { x: 220, z: -355, w: 18, h: 155, base: '#a8d8c8', palette: 'cool', crown: 'antenna' },
+      { x: 255, z: -335, w: 16, h: 100, base: '#f2e8d8', palette: 'warm', crown: 'flat' },
+      { x: -40, z: -390, w: 16, h: 95, base: '#ffb8a8', palette: 'warm', crown: 'flat' },
+      { x: 80, z: -390, w: 18, h: 140, base: '#9fd8e8', palette: 'cool', crown: 'antenna' },
+      { x: 170, z: -385, w: 16, h: 105, base: '#ffd8a8', palette: 'warm', crown: 'flat' },
     ];
-    for (const f of nycFill) {
-      const tiers = f.h > 130
-        ? [{ w: f.w, d: f.w * 0.9, h: f.h * 0.6 }, { w: f.w * 0.72, d: f.w * 0.65, h: f.h * 0.4 }]
-        : [{ w: f.w, d: f.w * 0.9, h: f.h }];
-      nycTower(f.x, f.z, { base: f.base, palette: f.palette, crown: f.crown, accent: f.accent, tiers });
+    for (const f of skyline) {
+      const tiers = f.h > 140
+        ? [{ w: f.w, d: f.w * 0.85, h: f.h * 0.65 }, { w: f.w * 0.7, d: f.w * 0.6, h: f.h * 0.35 }]
+        : [{ w: f.w, d: f.w * 0.85, h: f.h }];
+      coastalTower(f.x, f.z, { base: f.base, palette: f.palette, crown: f.crown, tiers });
     }
   }
 

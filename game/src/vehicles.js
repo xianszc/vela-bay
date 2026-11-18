@@ -200,12 +200,13 @@ export function buildChopper() {
   tailRotor.add(boxPart(0.08, 2.0, 0.3, bladeMat, 0, 0, 0));
   tailRotor.position.set(0.4, 0.5, 5.5);
   g.add(tailRotor);
-  // Searchlight cone (a translucent cone under the belly).
+  // Searchlight cone (a translucent cone under the belly). Narrow at
+  // the heli, spreading downward to the ground — a real searchlight
+  // beam, not an inverted triangle in the sky.
   const cone = new THREE.Mesh(
     new THREE.ConeGeometry(7, 26, 16, 1, true),
     new THREE.MeshBasicMaterial({ color: 0xfff2b8, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
   );
-  cone.rotation.x = Math.PI;
   cone.position.y = -14;
   g.add(cone);
   const spot = new THREE.SpotLight(0xfff2b8, 900, 90, 0.32, 0.5, 1.2);

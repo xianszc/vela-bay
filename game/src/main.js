@@ -650,11 +650,11 @@ VelaGame.prototype.applyShot = function (shot) {
     if (hero) this.enterVehicle({ kind: 'car', entity: hero });
     if (this.currentCar) {
       // V3: the hero drives NORTH up the main avenue from the
-      // boardwalk end, into downtown and toward the CBD skyline on the
-      // horizon. He starts at the south end of the avenue at a moderate
+      // boardwalk end, into downtown and toward the coastal skyline on
+      // the horizon. He starts at the south end of the avenue at a moderate
       // speed, so that when the screenshot is taken he is still south
-      // of downtown with a clear sightline north — the tall CBD towers
-      // are visible above the rooftops instead of being hidden behind
+      // of downtown with a clear sightline north — the tall coastal
+      // towers are visible above the rooftops instead of being hidden behind
       // the downtown blocks around the car.
       this.currentCar.pos.set(0, 0, 178);
       this.currentCar.heading = 0;
@@ -669,11 +669,13 @@ VelaGame.prototype.applyShot = function (shot) {
     this.clockSeconds = 17 * 3600 + 45 * 60;
     // V3: a true three-quarter chase camera — well off the car's rear
     // axis, on the sun-lit side, so the long teal side of the VELA GT
-    // reads instead of a flat rear view.
+    // reads instead of a flat rear view. V5: eased from -0.65 to -0.4
+    // so the big north-west sun sits inside the frame, upper-left,
+    // instead of just past the left edge.
     this.cam.targetDistance = 5.0;
     this.cam.tight = true;
     this.cam.pitch = 0.05;
-    this.cam.yaw = -0.65;
+    this.cam.yaw = -0.4;
     // The interceptors flank the hero, level with him at the frame's
     // edges, so the chase reads — two police cars right beside the
     // VELA GT, not far behind it where the camera cannot see them.
