@@ -32,12 +32,12 @@ export const WATERS = [
 ];
 
 export const HUES = {
-  skyTop: 0x2b1b4d, // dusk purple overhead
-  skyHorizon: 0xff8c42, // burning orange at the horizon
-  skyBand: 0xff5e7a, // pink band just above the sun
-  haze: 0xe08a6b, // warm fog that swallows the far city
-  sun: 0xffd27a,
-  ground: 0x3d3a4a,
+  skyTop: 0x9a8fc8, // soft mauve-violet overhead, like a late-afternoon sky
+  skyHorizon: 0xffb37a, // pale orange at the horizon, never red
+  skyBand: 0xffc9a8, // pale peach-pink band just above the sun
+  haze: 0xf2c49c, // warm peach haze that softens the far city
+  sun: 0xffe3ae,
+  ground: 0x615a52,
   walk: 0x8d8296,
   asphalt: 0x23202e,
   lane: 0xf5c542,
@@ -123,10 +123,10 @@ export const STATIONS = [
 ];
 
 export const CREW = {
-  rex: { name: 'REX VELA', role: 'DRIVER', color: '#14e0c8', initials: 'RV' },
-  mara: { name: 'MARA SOLIS', role: 'BOAT PILOT', color: '#ff7ab8', initials: 'MS' },
-  theo: { name: 'THEO KADE', role: 'FIXER', color: '#ffb020', initials: 'TK' },
-  dario: { name: 'DARIO FONTE', role: 'THE MARK', color: '#ff5e5e', initials: 'DF' },
+  rex: { name: 'REX VELA', role: 'DRIVER', color: '#14e0c8', initials: 'RV', skin: '#c98a5e', mood: 'grin' },
+  mara: { name: 'MARA SOLIS', role: 'BOAT PILOT', color: '#ff7ab8', initials: 'MS', skin: '#e8b88a', mood: 'smile' },
+  theo: { name: 'THEO KADE', role: 'FIXER', color: '#ffb020', initials: 'TK', skin: '#8a5a3a', mood: 'calm' },
+  dario: { name: 'DARIO FONTE', role: 'THE MARK', color: '#ff5e5e', initials: 'DF', skin: '#d9a077', mood: 'calm' },
 };
 
 // Heat 0..1000 maps to 0..5 wanted stars.

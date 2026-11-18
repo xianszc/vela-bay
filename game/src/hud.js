@@ -5,7 +5,7 @@
 // this file only shows them.
 
 import { ARSENAL, CREW } from './config.js';
-import { cash } from './util.js';
+import { cash, faceCanvas } from './util.js';
 
 function node(tag, cls, parent, html) {
   const e = document.createElement(tag);
@@ -32,8 +32,8 @@ const STYLE = `
 .tac.ROADBLOCK{background:#ff8c42;color:#111}.tac.SPOTLIGHT{background:#e8e4d8;color:#111}
 #topRight{position:absolute;top:12px;right:12px;text-align:right}
 #cash{font-size:30px;font-weight:900;color:#7dff6a;text-shadow:0 2px 0 rgba(0,0,0,.5)}
-#stars{font-size:26px;letter-spacing:2px;margin:2px 0}
-#stars .on{color:#ff3b3b;text-shadow:0 0 8px #ff3b3b}#stars .off{color:rgba(255,255,255,.25)}
+#stars{font-size:30px;letter-spacing:3px;margin:2px 0}
+#stars .on{color:#ff2222;text-shadow:0 0 12px #ff2222,0 0 4px #ff8888}#stars .off{color:rgba(255,255,255,.28)}
 #guns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
 .gslot{width:52px;padding:4px 2px;text-align:center;background:rgba(12,10,24,.78);border:1px solid rgba(255,255,255,.2);border-radius:6px;font-size:11px}
 .gslot.sel{border-color:#14e0c8;box-shadow:0 0 8px #14e0c8}
@@ -66,18 +66,29 @@ const STYLE = `
 #bigBanner .bSub{font-size:22px;font-weight:800;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.5)}
 #flash{position:absolute;left:50%;top:56%;transform:translateX(-50%);font-size:20px;font-weight:800;color:#7dff6a;text-shadow:0 2px 0 #000;display:none}
 #clock{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-size:13px;font-weight:800;color:#ffe9a8;text-shadow:0 1px 3px #000}
-.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:auto;z-index:10;background:radial-gradient(ellipse at 50% 30%,rgba(255,140,66,.25),rgba(10,6,24,.82) 70%)}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:auto;z-index:10;background:radial-gradient(ellipse at 50% 30%,rgba(255,178,110,.28),rgba(10,6,24,.82) 70%)}
+.screen.title{justify-content:flex-end;padding-right:4vw;background:linear-gradient(100deg,rgba(20,12,28,.05) 0%,rgba(20,12,28,.28) 40%,rgba(12,7,22,.88) 66%)}
 .screen .sheet{text-align:center;max-width:640px;padding:20px}
-.bigTitle{font-size:72px;font-weight:900;line-height:.95;letter-spacing:1px;color:#fff;text-shadow:0 0 24px rgba(255,140,66,.8),0 4px 0 rgba(0,0,0,.5)}
+.screen.title .sheet{text-align:left;max-width:560px;padding:24px 8px 24px 24px}
+.bigTitle{font-size:72px;font-weight:900;line-height:.95;letter-spacing:1px;color:#fff;text-shadow:0 0 24px rgba(255,178,110,.8),0 4px 0 rgba(0,0,0,.5)}
+.screen.title .bigTitle{font-size:86px}
 .bigTitle span{color:#14e0c8}
+.bigTitle .grad{background:linear-gradient(92deg,#ffd27a 0%,#ff9a5a 45%,#14e0c8 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:none}
+.titleRule{width:120px;height:4px;border-radius:2px;background:linear-gradient(90deg,#ffd27a,#14e0c8);margin:14px 0 4px}
+.screen.title .titleRule{margin-left:2px}
+.badgeRow{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+.badge{font-size:11px;font-weight:800;letter-spacing:1px;color:#ffd27a;background:rgba(255,210,122,.12);border:1px solid rgba(255,210,122,.45);border-radius:20px;padding:5px 10px}
 .tagLine{font-size:20px;color:#ffd27a;margin:8px 0 4px;font-weight:700}
 .tagSub{font-size:14px;color:#ddd;margin-bottom:16px}
 .crewRow{display:flex;gap:12px;justify-content:center;margin:14px 0 20px}
+.screen.title .crewRow{justify-content:flex-start}
 .crewChip{width:110px;background:rgba(12,10,24,.8);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:8px 4px}
 .crewChip .av{width:44px;height:44px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-weight:900;color:#111;font-size:18px}
 .crewChip .nm{font-weight:800;font-size:12px;color:#fff}.crewChip .rl{font-size:11px;color:#9fd8ff}
 .btn{display:block;width:280px;margin:8px auto;padding:12px 0;font-size:18px;font-weight:900;color:#111;background:#14e0c8;border:none;border-radius:8px;cursor:pointer}
+.btn.main{background:linear-gradient(92deg,#14e0c8,#0fb8a0);box-shadow:0 6px 18px rgba(20,224,200,.45)}
 .btn.alt{background:#ffc93c}.btn.ghost{background:rgba(255,255,255,.14);color:#fff}
+.screen.title .btn{margin-left:0}
 .btn:hover{filter:brightness(1.15)}
 .helpBox{text-align:left;font-size:14px;line-height:1.6;background:rgba(12,10,24,.8);border-radius:8px;padding:12px 16px;margin:10px auto;width:420px}
 .helpBox b{color:#ffc93c}
@@ -313,17 +324,28 @@ export class Overlay {
 
   showTitle(save, onAction) {
     this.clearScreen();
-    const o = node('div', 'screen', document.body);
+    const o = node('div', 'screen title', document.body);
     this.screen = o;
     const sheet = node('div', 'sheet', o);
-    node('div', 'bigTitle', sheet, 'VELA BAY<br><span>SUNSET HEIST</span>');
+    node('div', 'bigTitle', sheet, 'VELA BAY<br><span class="grad">SUNSET HEIST</span>');
+    node('div', 'titleRule', sheet);
     node('div', 'tagLine', sheet, 'An open-world crime story on the bay');
     node('div', 'tagSub', sheet, 'Steal cars. Steal boats. Outrun the VBPD. Take the Vela GT and vanish across the water.');
+    const badges = node('div', 'badgeRow', sheet);
+    for (const t of ['8 STORY MISSIONS', 'STEAL CARS & BOATS', 'WANTED UP TO 5★', 'OPEN-WORLD BAY CITY']) {
+      node('span', 'badge', badges, t);
+    }
     const crew = node('div', 'crewRow', sheet);
     for (const k of ['rex', 'mara', 'theo']) {
       const c = CREW[k];
       const chip = node('div', 'crewChip', crew);
-      node('div', 'av', chip, c.initials).style.background = c.color;
+      chip.style.borderTop = `3px solid ${c.color}`;
+      // A real face portrait (the same canvas face the 3D character
+      // wears), not initials — the crew reads as people, like the
+      // reference title screens.
+      const av = node('div', 'av', chip, '');
+      const face = faceCanvas(c.skin || '#c98a5e', c.mood || 'smile');
+      av.style.background = `${c.color} url(${face.toDataURL()}) center/cover no-repeat`;
       node('div', 'nm', chip, c.name);
       node('div', 'rl', chip, c.role);
     }
@@ -333,7 +355,7 @@ export class Overlay {
       return b;
     };
     if (save) mkBtn(`CONTINUE — MISSION ${save.mission + 1} · ${cash(save.money)}`, '', 'continue');
-    mkBtn('NEW GAME', save ? 'alt' : '', 'new');
+    mkBtn('NEW GAME', 'main', 'new');
     mkBtn('CONTROLS', 'ghost', 'controls');
     node('div', 'fine', sheet, 'WASD drive / walk · Mouse drag camera · F enter or steal · Click shoot · 1–4 weapons · Q radio · Shift sprint · Space handbrake · N nitro · M mute · Esc pause');
     if (save) node('div', 'fine', sheet, `Save found: mission ${save.mission + 1} of 8, rep ${Math.round(save.rep)}.`);

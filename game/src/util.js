@@ -41,16 +41,19 @@ export function clockText(seconds) {
 }
 
 // A small canvas texture with a grid of lit windows, for building faces.
-export function windowsCanvas(rng, base, litRatio) {
+// palette: 'warm' (sunset-lit flats) or 'cool' (blue glass towers).
+export function windowsCanvas(rng, base, litRatio, palette = 'warm') {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 256;
   const g = c.getContext('2d');
   g.fillStyle = base; g.fillRect(0, 0, 128, 256);
   const warm = ['#ffd27a', '#ffb020', '#ffe9a8', '#9fd8ff'];
+  const cool = ['#9fd8ff', '#cfe8ff', '#ffd27a', '#7fb8e8'];
+  const lit = palette === 'cool' ? cool : warm;
   for (let y = 8; y < 248; y += 22) {
     for (let x = 8; x < 120; x += 18) {
       if (rng() < litRatio) {
-        g.fillStyle = choose(rng, warm);
+        g.fillStyle = choose(rng, lit);
         g.globalAlpha = 0.75 + rng() * 0.25;
       } else {
         g.fillStyle = '#1c2033';
@@ -60,6 +63,50 @@ export function windowsCanvas(rng, base, litRatio) {
     }
   }
   g.globalAlpha = 1;
+  return c;
+}
+
+// A face for a low-poly character's head: eyes, brows and a smile drawn
+// on a skin-coloured canvas, so the character reads as a person with an
+// expression instead of a blank box. mood: 'smile' | 'grin' | 'calm'.
+export function faceCanvas(skin, mood = 'smile') {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = skin; g.fillRect(0, 0, 128, 128);
+  // Soft shading at the edges so the face is not flat.
+  const shade = g.createRadialGradient(64, 64, 20, 64, 64, 90);
+  shade.addColorStop(0, 'rgba(255,255,255,0.10)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.18)');
+  g.fillStyle = shade; g.fillRect(0, 0, 128, 128);
+  // Blush.
+  g.fillStyle = 'rgba(255,120,120,0.35)';
+  g.beginPath(); g.ellipse(28, 84, 12, 7, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(100, 84, 12, 7, 0, 0, Math.PI * 2); g.fill();
+  // Eyes: white, dark pupils, and a confident brow above each.
+  for (const ex of [40, 88]) {
+    g.fillStyle = '#fff';
+    g.beginPath(); g.ellipse(ex, 56, 11, 12, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#1a1210';
+    g.beginPath(); g.arc(ex, 58, 5.5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath(); g.arc(ex + 2, 55, 2, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#1a1210'; g.lineWidth = 4; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(ex - 11, 38); g.lineTo(ex + 11, 36); g.stroke();
+  }
+  // Smile: a wide open grin, a closed smile, or a calm small smile.
+  g.strokeStyle = '#5a2a1a'; g.lineWidth = 4; g.lineCap = 'round';
+  if (mood === 'grin') {
+    g.fillStyle = '#7a2a1a';
+    g.beginPath(); g.ellipse(64, 92, 20, 11, 0, 0, Math.PI); g.fill();
+    g.fillStyle = '#fff';
+    g.fillRect(46, 92, 36, 5);
+  } else if (mood === 'calm') {
+    g.beginPath(); g.moveTo(52, 94); g.quadraticCurveTo(64, 100, 76, 94); g.stroke();
+  } else {
+    g.lineWidth = 5;
+    g.beginPath(); g.arc(64, 84, 16, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+  }
   return c;
 }
 

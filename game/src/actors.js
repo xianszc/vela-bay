@@ -76,8 +76,9 @@ export class Cast {
   spawnPedestrians(count, spots) {
     const shirts = [0xff7ab8, 0x9fd8ff, 0xffb020, 0x8fd8a8, 0xd8a0ff, 0xe8e4d8];
     const skins = [0xc98a5e, 0x8a5a3a, 0xe8b88a, 0x6a4a2a];
+    const moods = ['smile', 'grin', 'calm'];
     for (let i = 0; i < count; i++) {
-      const c = buildFigure(choose(this.rng, shirts), 0x2a2d3a, choose(this.rng, skins));
+      const c = buildFigure(choose(this.rng, shirts), 0x2a2d3a, choose(this.rng, skins), choose(this.rng, moods));
       this.scene.add(c.group);
       const spot = choose(this.rng, spots);
       const ped = {
@@ -90,6 +91,31 @@ export class Cast {
         down: 0, flee: 0,
       };
       ped.pos.set(spot.x, 0, spot.z);
+      this.peds.push(ped);
+    }
+  }
+
+  // Pedestrians clustered around one spot — for staged shots, so the
+  // street near the camera is visibly alive instead of empty.
+  spawnPedestriansNear(x, z, count, radius = 14) {
+    const shirts = [0xff7ab8, 0x9fd8ff, 0xffb020, 0x8fd8a8, 0xd8a0ff, 0xe8e4d8, 0xff5e5e];
+    const skins = [0xc98a5e, 0x8a5a3a, 0xe8b88a, 0x6a4a2a];
+    const moods = ['smile', 'grin', 'calm'];
+    for (let i = 0; i < count; i++) {
+      const c = buildFigure(choose(this.rng, shirts), 0x2a2d3a, choose(this.rng, skins), choose(this.rng, moods));
+      this.scene.add(c.group);
+      const px = x + between(this.rng, -radius, radius);
+      const pz = z + between(this.rng, -radius, radius);
+      const ped = {
+        mesh: c.group, legs: c.legs, arms: c.arms,
+        pos: c.group.position,
+        heading: this.rng() * Math.PI * 2,
+        speed: between(this.rng, 1.2, 2.2),
+        target: { x: px + between(this.rng, -8, 8), z: pz + between(this.rng, -8, 8) },
+        phase: this.rng() * 10,
+        down: 0, flee: 0,
+      };
+      ped.pos.set(px, 0, pz);
       this.peds.push(ped);
     }
   }

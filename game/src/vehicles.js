@@ -27,17 +27,28 @@ export function buildWheel(radius = 0.42, width = 0.32) {
   const hub = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.55, radius * 0.55, width + 0.02, 10), paint(0xd8d8e0, { metalness: 0.7, roughness: 0.3 }));
   hub.rotation.z = Math.PI / 2;
   wheel.add(hub);
+  // A bright alloy rim ring on each face, so the wheels read as real
+  // sports rims instead of plain black discs.
+  const rimMat = paint(0xe8e8f0, { metalness: 0.85, roughness: 0.2 });
+  for (const side of [-1, 1]) {
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.72, 0.045, 8, 20), rimMat);
+    rim.rotation.y = Math.PI / 2;
+    rim.position.x = side * (width / 2 + 0.01);
+    wheel.add(rim);
+  }
   return wheel;
 }
 
 // Cars face -Z when heading = 0 (three.js convention used by the physics).
 export function buildCar(spec) {
   const g = new THREE.Group();
-  const body = paint(spec.color);
-  const dark = paint(0x14161f, { roughness: 0.3, metalness: 0.4 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, roughness: 0.12, metalness: 0.7 });
   const isTruck = spec.kind === 'truck';
   const isSport = spec.kind === 'sport';
+  // Sports cars get glossy, eye-catching paint — a real sports-car shine,
+  // not a matte box. The hero VELA GT is a sport car.
+  const body = paint(spec.color, isSport ? { roughness: 0.22, metalness: 0.65 } : {});
+  const dark = paint(0x14161f, { roughness: 0.3, metalness: 0.4 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, roughness: 0.12, metalness: 0.7 });
   const len = isTruck ? 5.6 : isSport ? 4.4 : 4.7;
   const wid = isTruck ? 2.3 : 2.0;
   const bodyH = isTruck ? 1.5 : 0.62;
@@ -59,13 +70,27 @@ export function buildCar(spec) {
       g.add(boxPart(0.12, 0.3, 0.12, dark, -wid / 2 + 0.2, 1.15, 2.05));
       g.add(boxPart(0.12, 0.3, 0.12, dark, wid / 2 - 0.2, 1.15, 2.05));
       g.add(boxPart(wid * 0.5, 0.08, 0.5, dark, 0, 0.98, -1.4));
+      // Sloped hood, side mirrors, front grille + bumper, and a racing
+      // stripe over the hood and roof — the details that make a sports
+      // car read as a real car instead of a plain box.
+      const hood = boxPart(wid - 0.15, 0.1, 1.1, body, 0, 0.95, -1.55);
+      hood.rotation.x = -0.07;
+      g.add(hood);
+      g.add(boxPart(0.14, 0.1, 0.22, dark, -wid / 2 - 0.05, 1.12, -0.55));
+      g.add(boxPart(0.14, 0.1, 0.22, dark, wid / 2 + 0.05, 1.12, -0.55));
+      g.add(boxPart(wid - 0.5, 0.2, 0.08, dark, 0, 0.42, -len / 2 - 0.01));
+      g.add(boxPart(wid, 0.14, 0.18, body, 0, 0.32, -len / 2 + 0.02));
+      g.add(boxPart(0.42, 0.03, 1.6, dark, 0, 0.94, -1.3));
+      g.add(boxPart(0.42, 0.03, 1.4, dark, 0, 1.6, 0.25));
     }
   }
-  // Headlights and taillights.
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2b8, emissive: 0xffe9a8, emissiveIntensity: 1.4 });
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2a3c, emissive: 0xff2a3c, emissiveIntensity: 1.2 });
-  g.add(boxPart(0.42, 0.16, 0.08, headMat, -wid / 2 + 0.35, 0.72, -len / 2 - 0.01));
-  g.add(boxPart(0.42, 0.16, 0.08, headMat, wid / 2 - 0.35, 0.72, -len / 2 - 0.01));
+  // Headlights and taillights — bigger and brighter on sports cars, so
+  // they glow in the afternoon light.
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2b8, emissive: 0xffe9a8, emissiveIntensity: isSport ? 2.4 : 1.4 });
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2a3c, emissive: 0xff2a3c, emissiveIntensity: isSport ? 1.8 : 1.2 });
+  const headW = isSport ? 0.55 : 0.42, headH = isSport ? 0.2 : 0.16;
+  g.add(boxPart(headW, headH, 0.08, headMat, -wid / 2 + 0.35, 0.72, -len / 2 - 0.01));
+  g.add(boxPart(headW, headH, 0.08, headMat, wid / 2 - 0.35, 0.72, -len / 2 - 0.01));
   g.add(boxPart(wid - 0.3, 0.14, 0.08, tailMat, 0, 0.72, len / 2 + 0.01));
 
   if (spec.kind === 'taxi') {
@@ -120,10 +145,21 @@ export function buildBoat(spec) {
   const deck = boxPart(1.9, 0.18, 4.6, paint(0xe8e4d8, { roughness: 0.8 }), 0, 1.05, 0.4);
   g.add(deck);
   const glass = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, roughness: 0.12, metalness: 0.7 });
-  g.add(boxPart(1.7, 0.7, 0.2, glass, 0, 1.5, -0.9));
+  const shield = boxPart(1.7, 0.7, 0.2, glass, 0, 1.5, -0.9);
+  shield.rotation.x = -0.22;
+  g.add(shield);
   g.add(boxPart(1.9, 0.5, 1.4, hull, 0, 1.35, 0.2));
+  // Glossy white racing stripe along each side of the hull, so the boat
+  // reads as a sleek speedboat instead of a plain coloured box.
+  const stripeMat = paint(0xf2f2ee, { roughness: 0.3, metalness: 0.4 });
+  g.add(boxPart(0.06, 0.22, 5.6, stripeMat, -1.12, 0.72, 0));
+  g.add(boxPart(0.06, 0.22, 5.6, stripeMat, 1.12, 0.72, 0));
   // Outboard motor.
   g.add(boxPart(0.5, 0.9, 0.5, paint(0x2a2d3a), 0, 0.6, 3.3));
+  // A slim antenna with a small flag, so the boat has a vertical accent.
+  const mast = boxPart(0.06, 1.1, 0.06, paint(0x2a2d3a), 0.8, 1.9, 0.9);
+  g.add(mast);
+  g.add(boxPart(0.4, 0.24, 0.04, paint(0xff5da2), 1.0, 2.35, 0.9));
   if (spec.kind === 'police-boat') {
     g.add(boxPart(2.0, 0.24, 1.2, paint(0x2266ff), 0, 0.75, 0.4));
     const bar = new THREE.Group();

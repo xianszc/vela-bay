@@ -5,7 +5,7 @@
 // goes faster.
 
 import * as THREE from 'three';
-import { clampNum, easeTo, turnToward } from './util.js';
+import { clampNum, easeTo, turnToward, faceCanvas } from './util.js';
 
 function limbPiece(w, h, d, color, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
@@ -14,14 +14,42 @@ function limbPiece(w, h, d, color, x, y, z) {
   return m;
 }
 
-export function buildFigure(shirt, pants, skin) {
+function skinCss(hex) {
+  return '#' + hex.toString(16).padStart(6, '0');
+}
+
+// mood: 'smile' | 'grin' | 'calm' — the face texture goes on the -Z
+// side of the head box, which is the direction the figure walks toward.
+// opts.cap: give the figure a driver cap in the shirt colour (Rex).
+export function buildFigure(shirt, pants, skin, mood = 'smile', opts = {}) {
   const g = new THREE.Group();
+  // A jacket in a darker shade of the shirt, open at the chest so the
+  // shirt shows — a real outfit, not a single-colour block.
+  const jacketCol = new THREE.Color(shirt).multiplyScalar(0.5);
   const torso = limbPiece(0.62, 0.72, 0.34, shirt, 0, 1.18, 0);
   g.add(torso);
-  const head = limbPiece(0.42, 0.42, 0.4, skin, 0, 1.78, 0);
+  g.add(limbPiece(0.66, 0.46, 0.38, jacketCol.getHex(), 0, 1.32, 0));
+  g.add(limbPiece(0.2, 0.3, 0.06, 0xf2ede2, 0, 1.3, -0.22));
+  const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.85 });
+  const faceTex = new THREE.CanvasTexture(faceCanvas(skinCss(skin), mood));
+  const faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.85 });
+  // Box face order: +X, -X, +Y, -Y, +Z, -Z. The face sits on -Z.
+  const head = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.42, 0.4),
+    [skinMat, skinMat, skinMat, skinMat, skinMat, faceMat],
+  );
+  head.position.set(0, 1.78, 0);
+  head.castShadow = true;
   g.add(head);
+  // A neck, so the head sits on the body instead of floating on it.
+  g.add(limbPiece(0.16, 0.14, 0.16, skin, 0, 1.58, 0));
   const hair = limbPiece(0.46, 0.16, 0.44, 0x1a1210, 0, 2.02, 0);
   g.add(hair);
+  if (opts.cap) {
+    // A driver cap in the shirt colour, with a brim over the face.
+    g.add(limbPiece(0.46, 0.1, 0.44, shirt, 0, 2.08, 0));
+    g.add(limbPiece(0.42, 0.05, 0.2, shirt, 0, 2.04, -0.28));
+  }
   const legs = {
     left: limbPiece(0.24, 0.8, 0.26, pants, -0.17, 0.4, 0),
     right: limbPiece(0.24, 0.8, 0.26, pants, 0.17, 0.4, 0),
@@ -31,6 +59,11 @@ export function buildFigure(shirt, pants, skin) {
   legs.right.geometry.translate(0, -0.4, 0);
   legs.right.position.y = 0.8;
   g.add(legs.left, legs.right);
+  // Shoes at the end of each leg.
+  for (const leg of [legs.left, legs.right]) {
+    const shoe = limbPiece(0.26, 0.1, 0.38, 0x1a1210, 0, -0.76, -0.05);
+    leg.add(shoe);
+  }
   const arms = {
     left: limbPiece(0.2, 0.66, 0.22, shirt, -0.42, 1.42, 0),
     right: limbPiece(0.2, 0.66, 0.22, shirt, 0.42, 1.42, 0),
@@ -40,13 +73,18 @@ export function buildFigure(shirt, pants, skin) {
   arms.right.geometry.translate(0, -0.3, 0);
   arms.right.position.y = 1.5;
   g.add(arms.left, arms.right);
+  // Hands at the end of each arm, so a wave or a celebration reads.
+  for (const arm of [arms.left, arms.right]) {
+    const hand = limbPiece(0.16, 0.16, 0.16, skin, 0, -0.68, 0);
+    arm.add(hand);
+  }
   return { group: g, legs, arms };
 }
 
 export class Walker {
   constructor(scene) {
     this.scene = scene;
-    const c = buildFigure(0x14e0c8, 0x23253a, 0xc98a5e);
+    const c = buildFigure(0x14e0c8, 0x23253a, 0xc98a5e, 'grin', { cap: true });
     this.mesh = c.group;
     this.legs = c.legs;
     this.arms = c.arms;
@@ -63,6 +101,36 @@ export class Walker {
   setVisible(v) {
     this.visible = v;
     this.mesh.visible = v;
+  }
+
+  // A staged pose for screenshots and menus: 'crossed' (arms folded,
+  // confident), 'wave' (one arm raised, greeting) or 'celebrate' (both
+  // arms in the air). The pose holds while the figure stands still and
+  // clears itself the moment the player starts walking again.
+  setPose(name) {
+    this.pose = name;
+    this.applyPose();
+  }
+
+  clearPose() { this.pose = null; }
+
+  applyPose() {
+    const a = this.arms;
+    if (!this.pose) {
+      a.left.rotation.set(0, 0, 0);
+      a.right.rotation.set(0, 0, 0);
+      return;
+    }
+    if (this.pose === 'crossed') {
+      a.left.rotation.set(-1.15, 0, 0.9);
+      a.right.rotation.set(-1.15, 0, -0.9);
+    } else if (this.pose === 'wave') {
+      a.left.rotation.set(0, 0, 0);
+      a.right.rotation.set(-2.7, 0, -0.35);
+    } else if (this.pose === 'celebrate') {
+      a.left.rotation.set(-2.8, 0, 0.35);
+      a.right.rotation.set(-2.8, 0, -0.35);
+    }
   }
 
   // Walk with WASD, relative to the camera yaw. Returns distance moved.
@@ -95,11 +163,24 @@ export class Walker {
       this.walkPhase += this.speed * dt * 1.6;
     }
     this.mesh.rotation.y = this.heading;
-    const swing = moving ? Math.sin(this.walkPhase) * 0.55 : 0;
-    this.legs.left.rotation.x = swing;
-    this.legs.right.rotation.x = -swing;
-    this.arms.left.rotation.x = -swing * 0.8;
-    this.arms.right.rotation.x = swing * 0.8;
+    if (moving) {
+      // Walking clears any staged pose.
+      if (this.pose) { this.pose = null; }
+      const swing = Math.sin(this.walkPhase) * 0.55;
+      this.legs.left.rotation.x = swing;
+      this.legs.right.rotation.x = -swing;
+      this.arms.left.rotation.x = -swing * 0.8;
+      this.arms.right.rotation.x = swing * 0.8;
+    } else if (this.pose) {
+      this.legs.left.rotation.x = 0;
+      this.legs.right.rotation.x = 0;
+      this.applyPose();
+    } else {
+      this.legs.left.rotation.x = 0;
+      this.legs.right.rotation.x = 0;
+      this.arms.left.rotation.x = 0;
+      this.arms.right.rotation.x = 0;
+    }
     return this.speed * dt;
   }
 }

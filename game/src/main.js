@@ -53,12 +53,13 @@ export class VelaGame {
     this.state = 'title'; // title | playing | paused | gameover | victory | freeroam
     this.time = 0;
     this.day = 1;
-    this.clockSeconds = 18 * 3600 + 24 * 60; // 18:24, golden hour
+    this.clockSeconds = 17 * 3600 + 20 * 60; // 17:20, late afternoon
     this.money = PAYOUTS.startCash;
     this.rep = 0;
     this.health = 100;
     this.armour = 50;
     this.heat = 0;
+    this.heatLock = 0; // staged shots pin the heat so the wanted stars cannot decay
     this.weaponSlot = 1;
     this.ammo = ARSENAL.map((w) => w.ammo);
     this.lastShot = 0;
@@ -80,7 +81,7 @@ export class VelaGame {
     this.spawnMooredBoats();
     this.actors.spawnParkedCars(this.world.parkedCars);
     this.actors.spawnTraffic(10);
-    this.actors.spawnPedestrians(14, this.world.sidewalkSpots);
+    this.actors.spawnPedestrians(24, this.world.sidewalkSpots);
 
     this.hud.setStation(STATIONS[0]);
     this.hud.setGuns(this.weaponSlot, this.ammo);
@@ -182,6 +183,7 @@ export class VelaGame {
       this.armour = 50;
     }
     this.heat = 0;
+    this.heatLock = 0;
     this.rammed = 0;
     this.autoDrive = false;
     this.shotCameraFixed = false;
@@ -462,11 +464,17 @@ VelaGame.prototype.updatePlaying = function (dt) {
   if (ev.playerDamage > 0) this.damagePlayer(ev.playerDamage * dt * 10);
   if (ev.busted) return this.gameOver('busted');
 
-  // Wanted heat decays when the law loses sight of the player.
-  const nearestPolice = this.actors.nearestUnits(g.playerPos, 1)[0];
-  const decay = !nearestPolice ? HEAT.coolFarPerSec
-    : nearestPolice.dist > 90 ? HEAT.coolPerSec : 0;
-  if (decay > 0) this.heat = Math.max(0, this.heat - decay * dt);
+  // Wanted heat decays when the law loses sight of the player — unless
+  // a staged shot pinned it, so the wanted stars in a screenshot can
+  // never fade while the scene is being captured.
+  if (this.heatLock) {
+    this.heat = this.heatLock;
+  } else {
+    const nearestPolice = this.actors.nearestUnits(g.playerPos, 1)[0];
+    const decay = !nearestPolice ? HEAT.coolFarPerSec
+      : nearestPolice.dist > 90 ? HEAT.coolPerSec : 0;
+    if (decay > 0) this.heat = Math.max(0, this.heat - decay * dt);
+  }
 
   // Jobs.
   if (this.jobs.active) {
@@ -612,11 +620,25 @@ VelaGame.prototype.applyShot = function (shot) {
       // Parked close to the camera and left of the menu, fully inside
       // the frame, so the teal VELA GT reads big in the title shot
       // instead of hiding behind the crew chips.
-      hero.pos.set(-7, 0, 150); hero.heading = 0.9;
+      hero.pos.set(-11, 0, 145); hero.heading = 0.9;
       hero.mesh.position.copy(hero.pos); hero.mesh.rotation.y = 0.9;
     }
-    this.camera.position.set(-7, 3.5, 162);
-    this.camera.lookAt(5, 2, 142);
+    // Rex Vela himself, standing IN FRONT of the hero car and close to
+    // the camera with a wave and a grin, facing the camera — the main
+    // character is the first thing you see, like the reference title
+    // screens, not a small figure lost beside the car. He stands left
+    // of the menu sheet (screen x ~330), so the menu never covers him.
+    this.player.pos.set(-8, 0, 152);
+    this.player.heading = Math.PI;
+    this.player.mesh.rotation.y = Math.PI;
+    this.player.setVisible(true);
+    this.player.setPose('wave');
+    // Pedestrians on the sidewalks nearby, kept clear of Rex so no
+    // stranger upstages the main character in his own title shot.
+    this.actors.spawnPedestriansNear(-22, 140, 4, 10);
+    this.actors.spawnPedestriansNear(12, 165, 3, 10);
+    this.camera.position.set(-8, 3.0, 160);
+    this.camera.lookAt(-2, 1.4, 146);
     this.hud.showTitle(null, this.menuAction);
     return;
   }
@@ -627,39 +649,52 @@ VelaGame.prototype.applyShot = function (shot) {
     const hero = this.actors.parked.find((c) => c.hero);
     if (hero) this.enterVehicle({ kind: 'car', entity: hero });
     if (this.currentCar) {
-      this.currentCar.pos.set(0, 0, 0);
-      this.currentCar.heading = Math.PI;
-      this.currentCar.speed = 38;
+      // V3: the hero drives NORTH up the main avenue from the
+      // boardwalk end, into downtown and toward the CBD skyline on the
+      // horizon. He starts at the south end of the avenue at a moderate
+      // speed, so that when the screenshot is taken he is still south
+      // of downtown with a clear sightline north — the tall CBD towers
+      // are visible above the rooftops instead of being hidden behind
+      // the downtown blocks around the car.
+      this.currentCar.pos.set(0, 0, 178);
+      this.currentCar.heading = 0;
+      this.currentCar.speed = 8;
       this.currentCar.condition = 88;
       this.currentCar.nitro = 72;
-      this.cam.snapTo({ pos: this.currentCar.pos, heading: Math.PI, speedKmh: 137 }, 'car');
+      this.cam.snapTo({ pos: this.currentCar.pos, heading: 0, speedKmh: 137 }, 'car');
     }
     this.heat = 800; // 4 stars: patrol cars + helicopter
+    this.heatLock = 800; // pinned: the stars cannot decay during the shot
     this.autoDrive = true;
-    this.clockSeconds = 18 * 3600 + 52 * 60;
-    // V2: the hero must dominate the frame — a closer, tightly tracking
-    // chase camera, angled slightly so the teal side of the car shows,
-    // and the interceptors on the hero's rear flanks. They chase from
-    // behind and wide, so they stay visible at the frame's edges and
-    // never drive between the camera and the teal car.
+    this.clockSeconds = 17 * 3600 + 45 * 60;
+    // V3: a true three-quarter chase camera — well off the car's rear
+    // axis, on the sun-lit side, so the long teal side of the VELA GT
+    // reads instead of a flat rear view.
     this.cam.targetDistance = 5.0;
     this.cam.tight = true;
-    this.cam.pitch = 0.16;
-    this.cam.yaw = 0.28;
-    for (const [px, pz] of [[-11, -5], [11, -5]]) {
-      const pc = this.actors.spawnPoliceCar({ x: 0, z: 0 });
+    this.cam.pitch = 0.05;
+    this.cam.yaw = -0.65;
+    // The interceptors flank the hero, level with him at the frame's
+    // edges, so the chase reads — two police cars right beside the
+    // VELA GT, not far behind it where the camera cannot see them.
+    for (const [px, pz] of [[-6, 176], [6, 176]]) {
+      const pc = this.actors.spawnPoliceCar({ x: 0, z: 178 });
       pc.pos.set(px, 0, pz);
-      pc.heading = Math.PI;
-      pc.speed = 40;
+      pc.heading = 0;
+      pc.speed = 8;
       pc.mesh.position.copy(pc.pos);
-      pc.mesh.rotation.y = Math.PI;
+      pc.mesh.rotation.y = 0;
     }
     this.actors.spawnHeli();
     if (this.actors.heli) this.actors.heli.angle = Math.PI / 2; // ahead, over the road
+    // Pedestrians on the sidewalks of the avenue ahead, so the street
+    // the hero races down is visibly alive.
+    this.actors.spawnPedestriansNear(0, 100, 5, 18);
     this.hud.showChat({ speaker: 'rex', text: "Rex: Lose them before the scanner window closes. The whole department is on us — don't stop!" });
     this.hud.flashEl.style.display = 'none';
     this.hud.flashTimer = 0;
     this.refreshHUD(1);
+    this.hud.setWanted(4);
     return;
   }
   if (shot === 'boat') {
@@ -675,8 +710,9 @@ VelaGame.prototype.applyShot = function (shot) {
       this.cam.snapTo({ pos: this.currentBoat.pos, heading: Math.PI * 0.8, speedKmh: 108 }, 'boat');
     }
     this.heat = 800; // 4 stars: marine unit + helicopter
+    this.heatLock = 800; // pinned: the stars cannot decay during the shot
     this.autoDrive = true;
-    this.clockSeconds = 18 * 3600 + 40 * 60;
+    this.clockSeconds = 17 * 3600 + 35 * 60;
     // V2: the boat reads bigger in frame (closer, tightly tracking
     // camera, angled slightly so the teal hull shows), and the marine
     // units chase on the hero's rear flanks — visible at the frame's
@@ -690,14 +726,15 @@ VelaGame.prototype.applyShot = function (shot) {
     this.jobs.step = 1;
     this.jobs.moveBeacon();
     {
-      // Rear flanks, well wide of the lens: the marine units are a
-      // touch slower than the hero here, so they hold their distance
-      // instead of closing in and crowding the hero.
+      // On the hero's flanks, level with him and wide of the lens: the
+      // marine units are IN the frame at the left and right edges,
+      // chasing beside the boat, instead of trailing behind the camera
+      // or bunching up ahead of it where the shot cannot read them.
       const fx = -Math.sin(Math.PI * 0.8), fz = -Math.cos(Math.PI * 0.8);
       const px = fz, pz = -fx;
       for (const side of [-1, 1]) {
         const pb = this.actors.spawnPoliceBoat({ x: 120, z: 340 });
-        pb.pos.set(120 - fx * 8 + px * 15 * side, 0.35, 340 - fz * 8 + pz * 15 * side);
+        pb.pos.set(120 + fx * 4 + px * 18 * side, 0.35, 340 + fz * 4 + pz * 18 * side);
         pb.heading = Math.PI * 0.8;
         pb.speed = 28;
         pb.mesh.position.copy(pb.pos);
@@ -706,10 +743,14 @@ VelaGame.prototype.applyShot = function (shot) {
     }
     this.actors.spawnHeli();
     if (this.actors.heli) this.actors.heli.angle = Math.PI / 2;
+    // People on Isla Luna's shore, so the island the boat races toward
+    // reads inhabited instead of empty.
+    this.actors.spawnPedestriansNear(-60, 300, 4, 16);
     this.hud.showChat({ speaker: 'mara', text: 'Mara: Marine unit is on us — keep the throttle down and thread the channel markers!' });
     this.hud.flashEl.style.display = 'none';
     this.hud.flashTimer = 0;
     this.refreshHUD(1);
+    this.hud.setWanted(4);
     return;
   }
   if (shot === 'end') {
@@ -730,9 +771,25 @@ VelaGame.prototype.applyShot = function (shot) {
       this.currentCar.speed = 0;
       this.currentCar.condition = 96;
       this.currentCar.pos.y = this.world.floorAt(20, 196);
+      // Sync the mesh to the new position BEFORE exiting the car: a
+      // parked car is not driven by the physics, so without this the
+      // mesh stays where the car was parked and the end shot shows
+      // empty sand.
+      this.currentCar.mesh.position.copy(this.currentCar.pos);
+      this.currentCar.mesh.rotation.y = this.currentCar.heading;
     }
+    // V3: Rex out of the car, celebrating beside it with both arms in
+    // the air and a grin, facing the camera — the victory is his, not
+    // just the car's. He stands close to the camera, on the sand
+    // between the car and the water, so he reads big and clear.
+    this.exitVehicle();
+    this.player.pos.set(23, 0, 200);
+    this.player.heading = Math.PI;
+    this.player.mesh.rotation.y = Math.PI;
+    this.player.setVisible(true);
+    this.player.setPose('celebrate');
     this.heat = 0;
-    this.clockSeconds = 18 * 3600 + 58 * 60;
+    this.clockSeconds = 17 * 3600 + 50 * 60;
     // Fixed camera for this shot: low, close, from the south over the
     // water, the teal side of the car in full profile with the boardwalk
     // and the city behind it.

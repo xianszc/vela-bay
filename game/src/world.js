@@ -91,6 +91,28 @@ function palmTree(rng, height) {
   return palm;
 }
 
+// A leafy shade tree: a straight trunk and a big round canopy, so the
+// sidewalks read green from a distance — palms alone are too thin.
+function leafyTree(rng, height) {
+  const tree = new THREE.Group();
+  const trunk = tube(0.22, 0.32, height * 0.6, 0x6a4a32, {}, 7);
+  trunk.position.y = height * 0.3;
+  tree.add(trunk);
+  const canopyColors = [0x3f8a4f, 0x5a9a3f, 0x2f7a5a, 0x6a9a3f];
+  const puffs = intBetween(rng, 2, 3);
+  for (let i = 0; i < puffs; i++) {
+    const s = new THREE.Mesh(
+      new THREE.SphereGeometry(between(rng, 1.6, 2.4), 8, 6),
+      shade(choose(rng, canopyColors), { roughness: 1 }),
+    );
+    s.position.set(between(rng, -1, 1), height * 0.6 + between(rng, 0.4, 1.4), between(rng, -1, 1));
+    s.scale.y = 0.75;
+    s.castShadow = true;
+    tree.add(s);
+  }
+  return tree;
+}
+
 function lampPost() {
   const g = new THREE.Group();
   const pole = tube(0.09, 0.12, 6.4, 0x2a2d3a, {}, 6);
@@ -141,44 +163,49 @@ export function buildTown(scene) {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), skyMat);
   scene.add(sky);
 
-  scene.fog = new THREE.Fog(HUES.haze, 180, 720);
+  scene.fog = new THREE.Fog(HUES.haze, 180, 850);
 
-  const sun = new THREE.DirectionalLight(0xffb36b, 3.1);
-  sun.position.set(-260, 110, 120);
+  // Low late-afternoon sun (elevation ~15 deg) so buildings, trees, cars
+  // and characters throw long, soft, clearly readable shadows across the
+  // streets, like a real afternoon photograph.
+  const sun = new THREE.DirectionalLight(0xffc98a, 3.0);
+  sun.position.set(-330, 92, 165);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -140; sun.shadow.camera.right = 140;
-  sun.shadow.camera.top = 140; sun.shadow.camera.bottom = -140;
-  sun.shadow.camera.far = 700;
+  sun.shadow.camera.left = -240; sun.shadow.camera.right = 240;
+  sun.shadow.camera.top = 240; sun.shadow.camera.bottom = -240;
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 900;
   sun.shadow.bias = -0.0006;
   scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0x9a7bc8, 0x4a3428, 1.25));
-  const fill = new THREE.DirectionalLight(0x9a8cff, 0.6);
-  fill.position.set(200, 120, -160);
+  scene.add(new THREE.HemisphereLight(0xa8c8e0, 0x7a5a44, 1.3));
+  const fill = new THREE.DirectionalLight(0x8fb8dd, 0.55);
+  fill.position.set(200, 140, -160);
   scene.add(fill);
 
-  // The sun disc itself, low over the bay, plus a halo sprite.
+  // The sun disc itself — a big, low, warm disc over the bay in the late
+  // afternoon, plus a soft halo sprite.
   const sunDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(34, 32),
+    new THREE.CircleGeometry(46, 32),
     new THREE.MeshBasicMaterial({ color: HUES.sun, fog: false }),
   );
-  sunDisc.position.set(-420, 62, 330);
+  sunDisc.position.set(-380, 80, 420);
   sunDisc.lookAt(0, 40, 0);
   scene.add(sunDisc);
-  const glowTex = new THREE.CanvasTexture(glowCanvas('rgba(255,210,122,0.85)', 'rgba(255,140,66,0)'));
+  const glowTex = new THREE.CanvasTexture(glowCanvas('rgba(255,224,170,0.85)', 'rgba(255,180,120,0)'));
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, transparent: true, depthWrite: false }));
-  halo.scale.set(260, 260, 1);
+  halo.scale.set(320, 320, 1);
   halo.position.copy(sunDisc.position);
   scene.add(halo);
 
-  // Drifting clouds, pink in the sunset light.
+  // Drifting clouds, peach in the afternoon light.
   for (let i = 0; i < 9; i++) {
     const cloud = new THREE.Group();
     const puffs = intBetween(rng, 3, 5);
     for (let p = 0; p < puffs; p++) {
       const s = new THREE.Mesh(
         new THREE.SphereGeometry(between(rng, 7, 16), 8, 6),
-        new THREE.MeshStandardMaterial({ color: 0xffc9b8, roughness: 1, transparent: true, opacity: 0.85, emissive: 0x80385a, emissiveIntensity: 0.35 }),
+        new THREE.MeshStandardMaterial({ color: 0xffe6cc, roughness: 1, transparent: true, opacity: 0.85, emissive: 0xb0703a, emissiveIntensity: 0.3 }),
       );
       s.position.set(p * 12 - puffs * 6, between(rng, -2, 3), between(rng, -4, 4));
       s.scale.y = 0.45;
@@ -192,7 +219,7 @@ export function buildTown(scene) {
   // ---- ground, beach, water --------------------------------------------
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(900, 900),
-    shade(0x5a5468, { roughness: 1 }),
+    shade(HUES.ground, { roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, 0, 40);
@@ -287,7 +314,21 @@ export function buildTown(scene) {
   }
 
   // ---- buildings ----------------------------------------------------------
-  const facadeColors = [0xe8dcc8, 0xd8a08a, 0x9fc8c0, 0xe8b88a, 0xc8b8d8, 0xa8c8e8, 0xe8c8a8, 0x8fb8a8];
+  // Fourteen facades, four window styles and three height bands, so no
+  // two blocks look alike: low shops with awnings, mid flats, tall
+  // office slabs, each with its own window pattern and rooftop clutter.
+  const facadeColors = [
+    0xe8dcc8, 0xd8a08a, 0x9fc8c0, 0xe8b88a, 0xc8b8d8, 0xa8c8e8,
+    0xe8c8a8, 0x8fb8a8, 0x14b8a8, 0xff8a7a, 0xf2e6c8, 0x9ab88a,
+    0xd88a5a, 0x7a9cc8,
+  ];
+  const windowStyles = [
+    { base: '#3a3348', lit: 0.55, palette: 'warm' },
+    { base: '#2e2a3e', lit: 0.7, palette: 'warm' },
+    { base: '#4a4038', lit: 0.35, palette: 'warm' },
+    { base: '#1e2a3a', lit: 0.5, palette: 'cool' },
+  ];
+  const awningColors = [0xff7ab8, 0x14e0c8, 0xffb020, 0xff5e5e, 0x9fd8ff, 0x8fd8a8];
   const signTexts = [
     ['VELA', 'GRAND CASINO'], ['HOTEL', 'LUNA'], ['TIDE', 'MARKET'],
     ['PALM', 'COURT'], ['SUNSET', 'MOTEL'], ['MARINA', 'YACHT CLUB'],
@@ -322,17 +363,26 @@ export function buildTown(scene) {
       for (let b = 0; b < count; b++) {
         const w = between(rng, 14, Math.min(30, x1 - x0 - 6));
         const d = between(rng, 12, Math.min(26, z1 - z0 - 6));
-        const h = downtown ? between(rng, 18, 46) : between(rng, 8, 22);
+        // Height bands: low shops, mid flats, tall slabs.
+        const hr = rng();
+        const h = downtown
+          ? hr < 0.3 ? between(rng, 6, 12) : hr < 0.7 ? between(rng, 14, 28) : between(rng, 30, 48)
+          : hr < 0.25 ? between(rng, 6, 9) : between(rng, 8, 22);
         const bx = between(rng, x0 + w / 2 + 2, x1 - w / 2 - 2);
         const bz = between(rng, z0 + d / 2 + 2, z1 - d / 2 - 2);
         const color = choose(rng, facadeColors);
-        const winTex = new THREE.CanvasTexture(windowsCanvas(rng, '#3a3348', 0.55));
+        const ws = choose(rng, windowStyles);
+        const winTex = new THREE.CanvasTexture(windowsCanvas(rng, ws.base, ws.lit, ws.palette));
         winTex.wrapS = THREE.RepeatWrapping; winTex.wrapT = THREE.RepeatWrapping;
         winTex.repeat.set(Math.max(1, Math.round(w / 14)), Math.max(1, Math.round(h / 14)));
         const walls = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
+        // Windows on all four sides, so a building reads as detailed from
+        // any angle — a plain side wall is what made the chase shot look
+        // like a blank beige box.
         const faces = new THREE.Mesh(
           new THREE.BoxGeometry(w, h, d),
-          [walls, walls,
+          [new THREE.MeshStandardMaterial({ map: winTex, roughness: 0.85 }),
+            new THREE.MeshStandardMaterial({ map: winTex, roughness: 0.85 }),
             new THREE.MeshStandardMaterial({ color: 0x2a2530, roughness: 1 }),
             walls,
             new THREE.MeshStandardMaterial({ map: winTex, roughness: 0.85 }),
@@ -341,6 +391,21 @@ export function buildTown(scene) {
         faces.position.set(bx, h / 2, bz);
         faces.castShadow = true; faces.receiveShadow = true;
         scene.add(faces);
+        // A setback crown on the tallest slabs, so the skyline steps.
+        if (h > 30) {
+          const crown = block(w * 0.55, 3.5, d * 0.55, color);
+          crown.position.set(bx, h + 1.75, bz);
+          scene.add(crown);
+          const antenna = tube(0.12, 0.2, 7, 0x2a2d3a, {}, 6);
+          antenna.position.set(bx + w * 0.2, h + 7, bz);
+          scene.add(antenna);
+          const tip = new THREE.Mesh(
+            new THREE.SphereGeometry(0.35, 8, 6),
+            new THREE.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 2 }),
+          );
+          tip.position.set(bx + w * 0.2, h + 10.6, bz);
+          scene.add(tip);
+        }
         // Rooftop clutter.
         const ac = block(between(rng, 2, 4), 1.2, between(rng, 2, 3), 0x6a6a72);
         ac.position.set(bx + between(rng, -w / 4, w / 4), h + 0.6, bz + between(rng, -d / 4, d / 4));
@@ -349,6 +414,25 @@ export function buildTown(scene) {
           const tank = tube(1.1, 1.1, 2.4, 0x8a7a6a, {}, 8);
           tank.position.set(bx - w / 4, h + 1.2, bz - d / 4);
           scene.add(tank);
+        }
+        // Low shops get a striped awning and a small shop sign over the
+        // door, so the street level reads as storefronts, not blank walls.
+        if (h <= 12) {
+          const awn = block(w * 0.7, 0.25, 2.2, choose(rng, awningColors));
+          awn.position.set(bx, 3.4, bz + d / 2 + 1.0);
+          awn.rotation.x = 0.25;
+          scene.add(awn);
+          const shopWord = choose(rng, ['CAFE', 'TACOS', 'SURF SHOP', 'BAR', 'PIZZA', 'FLOWERS']);
+          const shopTex = new THREE.CanvasTexture(signCanvas([shopWord], '#fff', '#241a33'));
+          const shopSign = new THREE.Mesh(
+            new THREE.PlaneGeometry(Math.min(10, w * 0.6), 1.6),
+            new THREE.MeshStandardMaterial({
+              map: shopTex, emissive: 0xffffff, emissiveMap: shopTex,
+              emissiveIntensity: 0.5,
+            }),
+          );
+          shopSign.position.set(bx, 4.8, bz + d / 2 + 0.15);
+          scene.add(shopSign);
         }
         // A neon sign on some taller buildings.
         if (h > 22 && signIndex < signTexts.length && rng() < 0.6) {
@@ -376,15 +460,134 @@ export function buildTown(scene) {
     }
   }
 
-  // ---- palms, streetlights, props along the boulevards -------------------
-  for (const x of TOWN.boulevards) {
-    for (let z = -170; z <= 170; z += 30) {
-      if (inWater(x + 10, z) || inWater(x - 10, z)) continue;
-      if (rng() < 0.55) {
-        const palm = palmTree(rng, between(rng, 5.5, 8.5));
-        palm.position.set(x + (rng() < 0.5 ? -10.5 : 10.5), 0, z + between(rng, -6, 6));
-        scene.add(palm);
+  // ---- the distant CBD skyline -------------------------------------------
+  // Tall glass towers far north of the grid, so the skyline reads on the
+  // horizon from downtown and from the title camera. Their windows glow,
+  // so they cut through the afternoon haze instead of washing out.
+  {
+    const cbdSpots = [];
+    for (let i = 0; i < 13; i++) {
+      cbdSpots.push({
+        x: -210 + i * 36 + between(rng, -8, 8),
+        z: -320 - between(rng, 0, 55),
+        w: between(rng, 16, 26),
+        d: between(rng, 16, 26),
+        h: between(rng, 90, 180),
+      });
+    }
+    // Two anchor towers, the tallest of the cluster, with spires.
+    cbdSpots[5].h = 230; cbdSpots[8].h = 200;
+    for (const t of cbdSpots) {
+      const winTex = new THREE.CanvasTexture(windowsCanvas(rng, '#16222e', 0.68, 'cool'));
+      winTex.wrapS = THREE.RepeatWrapping; winTex.wrapT = THREE.RepeatWrapping;
+      winTex.repeat.set(Math.max(1, Math.round(t.w / 12)), Math.max(1, Math.round(t.h / 16)));
+      const glassMat = new THREE.MeshStandardMaterial({
+        map: winTex, emissive: 0xffffff, emissiveMap: winTex,
+        emissiveIntensity: 0.65, roughness: 0.4, metalness: 0.3,
+      });
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(t.w, t.h, t.d), glassMat);
+      tower.position.set(t.x, t.h / 2, t.z);
+      tower.castShadow = true; tower.receiveShadow = true;
+      scene.add(tower);
+      if (t.h > 120) {
+        const spire = tube(0.5, 1.2, 16, 0x2a2d3a, {}, 6);
+        spire.position.set(t.x, t.h + 8, t.z);
+        scene.add(spire);
+        const beacon = new THREE.Mesh(
+          new THREE.SphereGeometry(0.8, 8, 6),
+          new THREE.MeshStandardMaterial({ color: 0xff3b3b, emissive: 0xff3b3b, emissiveIntensity: 2.5 }),
+        );
+        beacon.position.set(t.x, t.h + 16.5, t.z);
+        scene.add(beacon);
       }
+      colliders.push({ x0: t.x - t.w / 2, x1: t.x + t.w / 2, z0: t.z - t.d / 2, z1: t.z + t.d / 2 });
+    }
+  }
+
+  // ---- billboards ---------------------------------------------------------
+  // Big colourful roadside and rooftop ads — the GTA signature. A helper
+  // builds one from a canvas ad; the rest place them where the cameras
+  // look: along the main avenue, on downtown rooftops, by the marina.
+  function billboard(lines, fg, bg, w, h, sub) {
+    const tex = new THREE.CanvasTexture(signCanvas(lines, fg, bg, sub));
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshStandardMaterial({
+        map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.55, roughness: 0.6,
+      }),
+    );
+    m.castShadow = false;
+    return m;
+  }
+  const ads = [
+    [['VELA GT'], '#14e0c8', '#14161f'],
+    [['SUNSET'], '#ffd27a', '#ff5e5e', 'COLA'],
+    [['TIDE'], '#fff', '#1468c8', 'ENERGY DRINK'],
+    [['PALM HOTEL'], '#ffb020', '#241a33'],
+    [['GRAND'], '#ffd27a', '#7a1a5a', 'CASINO'],
+    [['SURF’S UP'], '#fff', '#0e8a6a'],
+    [['BAY BURGER'], '#ff8a3c', '#3a1a0e'],
+    [['NEON NIGHTS'], '#ff7ab8', '#1a1030'],
+  ];
+  // Freestanding roadside billboards on tall poles, facing the avenue.
+  const roadBoards = [
+    { x: 10, z: 40, ry: Math.PI / 2 }, { x: -10, z: -40, ry: -Math.PI / 2 },
+    { x: 10, z: -100, ry: Math.PI / 2 }, { x: -10, z: 100, ry: -Math.PI / 2 },
+    { x: 130, z: 40, ry: Math.PI / 2 }, { x: -130, z: -100, ry: -Math.PI / 2 },
+    { x: 70, z: 130, ry: Math.PI }, { x: -70, z: -130, ry: 0 },
+  ];
+  for (let i = 0; i < roadBoards.length; i++) {
+    const b = roadBoards[i];
+    const [lines, fg, bg, sub] = ads[i % ads.length];
+    const pole = tube(0.35, 0.45, 9, 0x2a2d3a, {}, 6);
+    pole.position.set(b.x, 4.5, b.z);
+    scene.add(pole);
+    const board = billboard(lines, fg, bg, 13, 6.5, sub);
+    board.position.set(b.x, 12.5, b.z);
+    board.rotation.y = b.ry;
+    scene.add(board);
+  }
+  // Two big rooftop billboards over downtown, angled at the avenue.
+  for (const [bx, bz, ry, ai] of [[-30, -30, Math.PI / 4, 0], [30, 30, -Math.PI * 0.75, 4]]) {
+    const [lines, fg, bg, sub] = ads[ai];
+    const tex = new THREE.CanvasTexture(signCanvas(lines, fg, bg, sub));
+    const board = new THREE.Mesh(
+      new THREE.PlaneGeometry(16, 8),
+      new THREE.MeshStandardMaterial({
+        map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.6, roughness: 0.6,
+      }),
+    );
+    board.position.set(bx, 52, bz);
+    board.rotation.y = ry;
+    scene.add(board);
+    const legs = block(0.6, 6, 0.6, 0x2a2d3a);
+    legs.position.set(bx, 46, bz);
+    scene.add(legs);
+  }
+
+  // ---- palms, leafy trees, streetlights along the boulevards ------------
+  // Dense and mixed: a palm or a leafy shade tree every ~22 m on both
+  // sidewalks, so the streets read green and alive from the chase camera.
+  for (const x of TOWN.boulevards) {
+    for (let z = -170; z <= 170; z += 22) {
+      if (inWater(x + 10, z) || inWater(x - 10, z)) continue;
+      if (rng() < 0.85) {
+        const side = rng() < 0.5 ? -10.5 : 10.5;
+        const tree = rng() < 0.55
+          ? palmTree(rng, between(rng, 6, 9))
+          : leafyTree(rng, between(rng, 4.5, 6.5));
+        tree.position.set(x + side, 0, z + between(rng, -5, 5));
+        scene.add(tree);
+      }
+    }
+  }
+  // A green row along the boardwalk, where the title and end shots look.
+  for (let x = -170; x <= 170; x += 18) {
+    if (inWater(x, 182)) continue;
+    if (rng() < 0.75) {
+      const tree = rng() < 0.5 ? palmTree(rng, between(rng, 6, 8.5)) : leafyTree(rng, between(rng, 4.5, 6));
+      tree.position.set(x + between(rng, -3, 3), 0, 182 + between(rng, 0, 4));
+      scene.add(tree);
     }
   }
   for (const x of [-180, -60, 60, 180]) {
