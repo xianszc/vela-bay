@@ -1,39 +1,40 @@
-// Vela Bay itself: the sunset city. Builds the sky dome, the sun, the bay
-// and the canal, the road grid, the buildings, the palms, the boardwalk, the
-// causeway to Isla Luna, the ferris wheel and the marina — all from one
-// seeded random stream so every load looks identical. Returns the collision
-// boxes, the water regions, the traffic loops and the animated bits the main
-// loop has to tick (water, ferris wheel, clouds).
+// Vela Bay itself: the sunset city. Builds the sky dome, the sun, the
+// bay and the canal, the road grid, the buildings, the palms, the
+// boardwalk, the causeway to Isla Luna, the ferris wheel and the marina
+// — all from one seeded random stream so every load looks identical.
+// Returns the collision boxes, the water regions, the traffic loops and
+// the animated bits the main loop has to tick (water, ferris wheel,
+// clouds).
 
 import * as THREE from 'three';
-import { CITY, PALETTE, WATER_RECTS } from './config.js';
-import { mulberry32, pick, range, rangeInt, clamp, makeWindowsTexture, makeSignTexture, makeGlowTexture } from './util.js';
+import { TOWN, HUES, WATERS } from './config.js';
+import { rng32, choose, between, intBetween, windowsCanvas, signCanvas, glowCanvas } from './util.js';
 
-const matCache = new Map();
-function mat(color, opts = {}) {
+const shadeCache = new Map();
+function shade(color, opts = {}) {
   const key = color + '|' + JSON.stringify(opts);
-  if (!matCache.has(key)) {
-    matCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, ...opts }));
+  if (!shadeCache.has(key)) {
+    shadeCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, ...opts }));
   }
-  return matCache.get(key);
+  return shadeCache.get(key);
 }
 
-function box(w, h, d, color, opts = {}) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, opts));
+function block(w, h, d, color, opts = {}) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), shade(color, opts));
   m.castShadow = opts.castShadow !== false;
   m.receiveShadow = true;
   return m;
 }
 
-function cyl(rt, rb, h, color, opts = {}, segments = 10) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, segments), mat(color, opts));
+function tube(rt, rb, h, color, opts = {}, segments = 10) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, segments), shade(color, opts));
   m.castShadow = opts.castShadow !== false;
   m.receiveShadow = true;
   return m;
 }
 
-function isWater(x, z) {
-  for (const r of WATER_RECTS) {
+function inWater(x, z) {
+  for (const r of WATERS) {
     if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) return true;
   }
   return false;
@@ -45,9 +46,9 @@ function isWater(x, z) {
 // the causeway itself, whose deck sits 7.6 m up, reached by ramps at both
 // ends, so a car (or a pedestrian) can cross the bay to Isla Luna.
 const ISLAND_TOP = 2.7;
-function groundHeightAt(x, z) {
+function floorAt(x, z) {
   let h = 0;
-  const d = Math.hypot(x - CITY.island.x, z - CITY.island.z);
+  const d = Math.hypot(x - TOWN.island.x, z - TOWN.island.z);
   if (d < 66) {
     if (d <= 50) h = ISLAND_TOP;
     else {
@@ -55,7 +56,7 @@ function groundHeightAt(x, z) {
       h = ISLAND_TOP * t * t * (3 - 2 * t);
     }
   }
-  if (Math.abs(x - CITY.causewayX) < 6.4 && z >= 175 && z <= 325) {
+  if (Math.abs(x - TOWN.causewayX) < 6.4 && z >= 175 && z <= 325) {
     let ch;
     if (z < 197) ch = 3.8 + 0.331 * (z - 186); // north ramp up to the deck
     else if (z <= 303) ch = 7.6; // the deck
@@ -65,17 +66,17 @@ function groundHeightAt(x, z) {
   return h;
 }
 
-function makePalm(rng, height) {
+function palmTree(rng, height) {
   const palm = new THREE.Group();
-  const trunk = cyl(0.22, 0.34, height, 0x8a6a4a, {}, 7);
+  const trunk = tube(0.22, 0.34, height, 0x8a6a4a, {}, 7);
   trunk.position.y = height / 2;
-  trunk.rotation.z = range(rng, -0.08, 0.08);
+  trunk.rotation.z = between(rng, -0.08, 0.08);
   palm.add(trunk);
   const fronds = 7;
   for (let i = 0; i < fronds; i++) {
     const frond = new THREE.Mesh(
       new THREE.ConeGeometry(0.5, 3.4, 4),
-      mat(0x2f9e5f, { roughness: 0.9 }),
+      shade(0x2f9e5f, { roughness: 0.9 }),
     );
     const a = (i / fronds) * Math.PI * 2 + rng() * 0.4;
     frond.position.set(Math.cos(a) * 1.3, height + 0.4, Math.sin(a) * 1.3);
@@ -84,18 +85,18 @@ function makePalm(rng, height) {
     frond.castShadow = true;
     palm.add(frond);
   }
-  const nuts = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), mat(0x6b4a2a));
+  const nuts = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), shade(0x6b4a2a));
   nuts.position.y = height - 0.2;
   palm.add(nuts);
   return palm;
 }
 
-function makeStreetlight() {
+function lampPost() {
   const g = new THREE.Group();
-  const pole = cyl(0.09, 0.12, 6.4, 0x2a2d3a, {}, 6);
+  const pole = tube(0.09, 0.12, 6.4, 0x2a2d3a, {}, 6);
   pole.position.y = 3.2;
   g.add(pole);
-  const arm = box(1.6, 0.12, 0.12, 0x2a2d3a);
+  const arm = block(1.6, 0.12, 0.12, 0x2a2d3a);
   arm.position.set(0.7, 6.3, 0);
   g.add(arm);
   const lamp = new THREE.Mesh(
@@ -107,8 +108,8 @@ function makeStreetlight() {
   return g;
 }
 
-export function buildWorld(scene) {
-  const rng = mulberry32(CITY.seed);
+export function buildTown(scene) {
+  const rng = rng32(TOWN.seed);
   const colliders = [];
   const parkedCars = [];
   const animated = { waterMats: [], ferris: null, clouds: [], heliPad: null };
@@ -121,9 +122,9 @@ export function buildWorld(scene) {
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new THREE.Color(PALETTE.skyTop) },
-      mid: { value: new THREE.Color(PALETTE.skyLow) },
-      horizon: { value: new THREE.Color(PALETTE.skyHorizon) },
+      top: { value: new THREE.Color(HUES.skyTop) },
+      mid: { value: new THREE.Color(HUES.skyBand) },
+      horizon: { value: new THREE.Color(HUES.skyHorizon) },
     },
     vertexShader: `
       varying vec3 vPos;
@@ -140,7 +141,7 @@ export function buildWorld(scene) {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), skyMat);
   scene.add(sky);
 
-  scene.fog = new THREE.Fog(PALETTE.fog, 180, 720);
+  scene.fog = new THREE.Fog(HUES.haze, 180, 720);
 
   const sun = new THREE.DirectionalLight(0xffb36b, 3.1);
   sun.position.set(-260, 110, 120);
@@ -159,12 +160,12 @@ export function buildWorld(scene) {
   // The sun disc itself, low over the bay, plus a halo sprite.
   const sunDisc = new THREE.Mesh(
     new THREE.CircleGeometry(34, 32),
-    new THREE.MeshBasicMaterial({ color: PALETTE.sun, fog: false }),
+    new THREE.MeshBasicMaterial({ color: HUES.sun, fog: false }),
   );
   sunDisc.position.set(-420, 62, 330);
   sunDisc.lookAt(0, 40, 0);
   scene.add(sunDisc);
-  const glowTex = new THREE.CanvasTexture(makeGlowTexture('rgba(255,210,122,0.85)', 'rgba(255,140,66,0)'));
+  const glowTex = new THREE.CanvasTexture(glowCanvas('rgba(255,210,122,0.85)', 'rgba(255,140,66,0)'));
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, transparent: true, depthWrite: false }));
   halo.scale.set(260, 260, 1);
   halo.position.copy(sunDisc.position);
@@ -173,17 +174,17 @@ export function buildWorld(scene) {
   // Drifting clouds, pink in the sunset light.
   for (let i = 0; i < 9; i++) {
     const cloud = new THREE.Group();
-    const puffs = rangeInt(rng, 3, 5);
+    const puffs = intBetween(rng, 3, 5);
     for (let p = 0; p < puffs; p++) {
       const s = new THREE.Mesh(
-        new THREE.SphereGeometry(range(rng, 7, 16), 8, 6),
+        new THREE.SphereGeometry(between(rng, 7, 16), 8, 6),
         new THREE.MeshStandardMaterial({ color: 0xffc9b8, roughness: 1, transparent: true, opacity: 0.85, emissive: 0x80385a, emissiveIntensity: 0.35 }),
       );
-      s.position.set(p * 12 - puffs * 6, range(rng, -2, 3), range(rng, -4, 4));
+      s.position.set(p * 12 - puffs * 6, between(rng, -2, 3), between(rng, -4, 4));
       s.scale.y = 0.45;
       cloud.add(s);
     }
-    cloud.position.set(range(rng, -420, 420), range(rng, 90, 170), range(rng, -380, 380));
+    cloud.position.set(between(rng, -420, 420), between(rng, 90, 170), between(rng, -380, 380));
     scene.add(cloud);
     animated.clouds.push(cloud);
   }
@@ -191,14 +192,14 @@ export function buildWorld(scene) {
   // ---- ground, beach, water --------------------------------------------
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(900, 900),
-    mat(0x5a5468, { roughness: 1 }),
+    shade(0x5a5468, { roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, 0, 40);
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const sand = new THREE.Mesh(new THREE.PlaneGeometry(760, 26), mat(PALETTE.sand, { roughness: 1 }));
+  const sand = new THREE.Mesh(new THREE.PlaneGeometry(760, 26), shade(HUES.sand, { roughness: 1 }));
   sand.rotation.x = -Math.PI / 2;
   sand.position.set(0, 0.06, 196);
   sand.receiveShadow = true;
@@ -208,7 +209,7 @@ export function buildWorld(scene) {
     transparent: true,
     opacity: 0.94,
     fog: false, // no fog chunks in this shader; three.js would fault on missing fog uniforms
-    uniforms: { time: { value: 0 }, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(PALETTE.waterDeep) } },
+    uniforms: { time: { value: 0 }, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(HUES.seaDeep) } },
     vertexShader: `
       uniform float time; varying vec2 vUv; varying float vWave;
       void main() {
@@ -233,7 +234,7 @@ export function buildWorld(scene) {
   animated.waterMats.push(waterMat);
 
   const canalMat = waterMat.clone();
-  canalMat.uniforms = { time: waterMat.uniforms.time, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(PALETTE.waterDeep) } };
+  canalMat.uniforms = { time: waterMat.uniforms.time, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(HUES.seaDeep) } };
   const canal = new THREE.Mesh(new THREE.PlaneGeometry(32, 390), canalMat);
   canal.rotation.x = -Math.PI / 2;
   canal.position.set(156, 0.35, 10);
@@ -241,7 +242,7 @@ export function buildWorld(scene) {
   animated.waterMats.push(canalMat);
 
   const marinaMat = waterMat.clone();
-  marinaMat.uniforms = { time: waterMat.uniforms.time, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(PALETTE.waterDeep) } };
+  marinaMat.uniforms = { time: waterMat.uniforms.time, shallow: { value: new THREE.Color(0x3fb2d8) }, deep: { value: new THREE.Color(HUES.seaDeep) } };
   const marina = new THREE.Mesh(new THREE.PlaneGeometry(62, 112), marinaMat);
   marina.rotation.x = -Math.PI / 2;
   marina.position.set(-177, 0.35, 148);
@@ -258,7 +259,6 @@ export function buildWorld(scene) {
   }
   const roadTex = new THREE.CanvasTexture(roadTexCanvas);
   roadTex.wrapS = THREE.RepeatWrapping; roadTex.wrapT = THREE.RepeatWrapping;
-  const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.95 });
 
   function roadStrip(x, z, w, d, repeatX, repeatZ) {
     const t = roadTex.clone();
@@ -271,16 +271,16 @@ export function buildWorld(scene) {
     scene.add(m);
   }
 
-  for (const x of CITY.avenues) {
+  for (const x of TOWN.boulevards) {
     roadStrip(x, 0, 12, 372, 1, 12);
-    const walkL = new THREE.Mesh(new THREE.PlaneGeometry(4, 372), mat(PALETTE.sidewalk, { roughness: 1 }));
+    const walkL = new THREE.Mesh(new THREE.PlaneGeometry(4, 372), shade(HUES.walk, { roughness: 1 }));
     walkL.rotation.x = -Math.PI / 2; walkL.position.set(x - 8, 0.1, 0); walkL.receiveShadow = true;
     scene.add(walkL);
     const walkR = walkL.clone(); walkR.position.x = x + 8; scene.add(walkR);
   }
-  for (const z of CITY.streets) {
+  for (const z of TOWN.streets) {
     roadStrip(0, z, 372, 12, 12, 1);
-    const walkT = new THREE.Mesh(new THREE.PlaneGeometry(372, 4), mat(PALETTE.sidewalk, { roughness: 1 }));
+    const walkT = new THREE.Mesh(new THREE.PlaneGeometry(372, 4), shade(HUES.walk, { roughness: 1 }));
     walkT.rotation.x = -Math.PI / 2; walkT.position.set(0, 0.1, z - 8); walkT.receiveShadow = true;
     scene.add(walkT);
     const walkB = walkT.clone(); walkB.position.z = z + 8; scene.add(walkB);
@@ -294,39 +294,39 @@ export function buildWorld(scene) {
   ];
   let signIndex = 0;
 
-  for (let ai = 0; ai < CITY.avenues.length - 1; ai++) {
-    for (let si = 0; si < CITY.streets.length - 1; si++) {
-      const x0 = CITY.avenues[ai] + 11, x1 = CITY.avenues[ai + 1] - 11;
-      const z0 = CITY.streets[si] + 11, z1 = CITY.streets[si + 1] - 11;
+  for (let ai = 0; ai < TOWN.boulevards.length - 1; ai++) {
+    for (let si = 0; si < TOWN.streets.length - 1; si++) {
+      const x0 = TOWN.boulevards[ai] + 11, x1 = TOWN.boulevards[ai + 1] - 11;
+      const z0 = TOWN.streets[si] + 11, z1 = TOWN.streets[si + 1] - 11;
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       // Skip blocks drowned by the canal, the marina or the beach.
-      if (x0 < CITY.canal.x1 && x1 > CITY.canal.x0) continue;
-      if (x0 < CITY.marina.x1 && x1 > CITY.marina.x0 && z0 < CITY.marina.z1 && z1 > CITY.marina.z0) continue;
+      if (x0 < TOWN.canal.x1 && x1 > TOWN.canal.x0) continue;
+      if (x0 < TOWN.marina.x1 && x1 > TOWN.marina.x0 && z0 < TOWN.marina.z1 && z1 > TOWN.marina.z0) continue;
       if (z1 > 178) continue;
       const downtown = Math.abs(cx) < 80 && Math.abs(cz) < 80;
       const roll = rng();
       if (roll < 0.14) {
         // A pocket park: palms, benches, a fountain square.
         for (let p = 0; p < 5; p++) {
-          const palm = makePalm(rng, range(rng, 5, 8));
-          palm.position.set(range(rng, x0 + 4, x1 - 4), 0, range(rng, z0 + 4, z1 - 4));
+          const palm = palmTree(rng, between(rng, 5, 8));
+          palm.position.set(between(rng, x0 + 4, x1 - 4), 0, between(rng, z0 + 4, z1 - 4));
           scene.add(palm);
         }
-        const fountain = cyl(2.2, 2.6, 0.8, 0x9fc8d8, {}, 12);
+        const fountain = tube(2.2, 2.6, 0.8, 0x9fc8d8, {}, 12);
         fountain.position.set(cx, 0.4, cz);
         scene.add(fountain);
         sidewalkSpots.push({ x: cx, z: cz });
         continue;
       }
-      const count = downtown ? rangeInt(rng, 2, 3) : rangeInt(rng, 1, 2);
+      const count = downtown ? intBetween(rng, 2, 3) : intBetween(rng, 1, 2);
       for (let b = 0; b < count; b++) {
-        const w = range(rng, 14, Math.min(30, x1 - x0 - 6));
-        const d = range(rng, 12, Math.min(26, z1 - z0 - 6));
-        const h = downtown ? range(rng, 18, 46) : range(rng, 8, 22);
-        const bx = range(rng, x0 + w / 2 + 2, x1 - w / 2 - 2);
-        const bz = range(rng, z0 + d / 2 + 2, z1 - d / 2 - 2);
-        const color = pick(rng, facadeColors);
-        const winTex = new THREE.CanvasTexture(makeWindowsTexture(rng, '#3a3348', 0.55));
+        const w = between(rng, 14, Math.min(30, x1 - x0 - 6));
+        const d = between(rng, 12, Math.min(26, z1 - z0 - 6));
+        const h = downtown ? between(rng, 18, 46) : between(rng, 8, 22);
+        const bx = between(rng, x0 + w / 2 + 2, x1 - w / 2 - 2);
+        const bz = between(rng, z0 + d / 2 + 2, z1 - d / 2 - 2);
+        const color = choose(rng, facadeColors);
+        const winTex = new THREE.CanvasTexture(windowsCanvas(rng, '#3a3348', 0.55));
         winTex.wrapS = THREE.RepeatWrapping; winTex.wrapT = THREE.RepeatWrapping;
         winTex.repeat.set(Math.max(1, Math.round(w / 14)), Math.max(1, Math.round(h / 14)));
         const walls = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
@@ -342,11 +342,11 @@ export function buildWorld(scene) {
         faces.castShadow = true; faces.receiveShadow = true;
         scene.add(faces);
         // Rooftop clutter.
-        const ac = box(range(rng, 2, 4), 1.2, range(rng, 2, 3), 0x6a6a72);
-        ac.position.set(bx + range(rng, -w / 4, w / 4), h + 0.6, bz + range(rng, -d / 4, d / 4));
+        const ac = block(between(rng, 2, 4), 1.2, between(rng, 2, 3), 0x6a6a72);
+        ac.position.set(bx + between(rng, -w / 4, w / 4), h + 0.6, bz + between(rng, -d / 4, d / 4));
         scene.add(ac);
         if (rng() < 0.3) {
-          const tank = cyl(1.1, 1.1, 2.4, 0x8a7a6a, {}, 8);
+          const tank = tube(1.1, 1.1, 2.4, 0x8a7a6a, {}, 8);
           tank.position.set(bx - w / 4, h + 1.2, bz - d / 4);
           scene.add(tank);
         }
@@ -356,8 +356,8 @@ export function buildWorld(scene) {
           const sign = new THREE.Mesh(
             new THREE.PlaneGeometry(12, 6),
             new THREE.MeshStandardMaterial({
-              map: new THREE.CanvasTexture(makeSignTexture([l1], '#ffd27a', '#241a33', l2)),
-              emissive: 0xffffff, emissiveMap: new THREE.CanvasTexture(makeSignTexture([l1], '#ffd27a', '#241a33', l2)),
+              map: new THREE.CanvasTexture(signCanvas([l1], '#ffd27a', '#241a33', l2)),
+              emissive: 0xffffff, emissiveMap: new THREE.CanvasTexture(signCanvas([l1], '#ffd27a', '#241a33', l2)),
               emissiveIntensity: 0.9,
             }),
           );
@@ -370,40 +370,40 @@ export function buildWorld(scene) {
       // on the road's edge, so it can always drive away (never boxed in by
       // a building inside the block).
       if (rng() < 0.5) {
-        parkedCars.push({ x: CITY.avenues[ai] + 7, z: cz + range(rng, -16, 16), heading: pick(rng, [0, Math.PI]) });
+        parkedCars.push({ x: TOWN.boulevards[ai] + 7, z: cz + between(rng, -16, 16), heading: choose(rng, [0, Math.PI]) });
       }
       sidewalkSpots.push({ x: cx, z: cz });
     }
   }
 
-  // ---- palms, streetlights, props along the avenues ---------------------
-  for (const x of CITY.avenues) {
+  // ---- palms, streetlights, props along the boulevards -------------------
+  for (const x of TOWN.boulevards) {
     for (let z = -170; z <= 170; z += 30) {
-      if (isWater(x + 10, z) || isWater(x - 10, z)) continue;
+      if (inWater(x + 10, z) || inWater(x - 10, z)) continue;
       if (rng() < 0.55) {
-        const palm = makePalm(rng, range(rng, 5.5, 8.5));
-        palm.position.set(x + (rng() < 0.5 ? -10.5 : 10.5), 0, z + range(rng, -6, 6));
+        const palm = palmTree(rng, between(rng, 5.5, 8.5));
+        palm.position.set(x + (rng() < 0.5 ? -10.5 : 10.5), 0, z + between(rng, -6, 6));
         scene.add(palm);
       }
     }
   }
   for (const x of [-180, -60, 60, 180]) {
     for (const z of [-120, 0, 120]) {
-      const lamp = makeStreetlight();
+      const lamp = lampPost();
       lamp.position.set(x + 7.5, 0, z + 7.5);
       scene.add(lamp);
     }
   }
   // Beach umbrellas and boardwalk benches (none in the marina channel).
   for (let x = -170; x <= 170; x += 26) {
-    if (isWater(x, 192)) continue;
+    if (inWater(x, 192)) continue;
     if (rng() < 0.7) {
-      const pole = cyl(0.08, 0.08, 2.6, 0xd8d8d8, {}, 6);
+      const pole = tube(0.08, 0.08, 2.6, 0xd8d8d8, {}, 6);
       pole.position.set(x, 1.3, 192);
       scene.add(pole);
       const top = new THREE.Mesh(
         new THREE.ConeGeometry(2.2, 1.1, 8),
-        mat(pick(rng, [0xff7ab8, 0xffb020, 0x14e0c8, 0xff5e5e]), { roughness: 0.9 }),
+        shade(choose(rng, [0xff7ab8, 0xffb020, 0x14e0c8, 0xff5e5e]), { roughness: 0.9 }),
       );
       top.position.set(x, 2.9, 192);
       top.castShadow = true;
@@ -413,45 +413,45 @@ export function buildWorld(scene) {
 
   // ---- the causeway bridge to Isla Luna ----------------------------------
   const bridge = new THREE.Group();
-  const deck = box(14, 1.2, 130, 0x4a4556);
-  deck.position.set(CITY.causewayX, CITY.causewayDeckY, 250);
+  const deck = block(14, 1.2, 130, 0x4a4556);
+  deck.position.set(TOWN.causewayX, TOWN.deckY, 250);
   bridge.add(deck);
   for (let z = 196; z <= 304; z += 18) {
-    const pillar = box(3, CITY.causewayDeckY + 2, 3, 0x6a6478);
-    pillar.position.set(CITY.causewayX, (CITY.causewayDeckY - 1) / 2, z);
+    const pillar = block(3, TOWN.deckY + 2, 3, 0x6a6478);
+    pillar.position.set(TOWN.causewayX, (TOWN.deckY - 1) / 2, z);
     bridge.add(pillar);
   }
   for (const side of [-1, 1]) {
-    const rail = box(0.5, 1.1, 130, 0x8a8496);
-    rail.position.set(CITY.causewayX + side * 6.8, CITY.causewayDeckY + 1.1, 250);
+    const rail = block(0.5, 1.1, 130, 0x8a8496);
+    rail.position.set(TOWN.causewayX + side * 6.8, TOWN.deckY + 1.1, 250);
     bridge.add(rail);
   }
   // Ramps where the avenue meets the deck.
-  const rampN = box(14, 0.8, 22, 0x4a4556);
-  rampN.position.set(CITY.causewayX, 3.4, 186);
+  const rampN = block(14, 0.8, 22, 0x4a4556);
+  rampN.position.set(TOWN.causewayX, 3.4, 186);
   rampN.rotation.x = 0.32;
   bridge.add(rampN);
-  const rampS = box(14, 0.8, 22, 0x4a4556);
-  rampS.position.set(CITY.causewayX, 3.4, 314);
+  const rampS = block(14, 0.8, 22, 0x4a4556);
+  rampS.position.set(TOWN.causewayX, 3.4, 314);
   rampS.rotation.x = -0.32;
   bridge.add(rampS);
   scene.add(bridge);
-  colliders.push({ x0: CITY.causewayX - 7.4, x1: CITY.causewayX - 6.4, z0: 186, z1: 314 });
-  colliders.push({ x0: CITY.causewayX + 6.4, x1: CITY.causewayX + 7.4, z0: 186, z1: 314 });
+  colliders.push({ x0: TOWN.causewayX - 7.4, x1: TOWN.causewayX - 6.4, z0: 186, z1: 314 });
+  colliders.push({ x0: TOWN.causewayX + 6.4, x1: TOWN.causewayX + 7.4, z0: 186, z1: 314 });
 
   // ---- Isla Luna: ferris wheel, lighthouse, pier --------------------------
   const island = new THREE.Mesh(
-    new THREE.CylinderGeometry(CITY.island.radius, CITY.island.radius + 6, 3, 28),
-    mat(0x6a8a6a, { roughness: 1 }),
+    new THREE.CylinderGeometry(TOWN.island.radius, TOWN.island.radius + 6, 3, 28),
+    shade(0x6a8a6a, { roughness: 1 }),
   );
-  island.position.set(CITY.island.x, 1.2, CITY.island.z);
+  island.position.set(TOWN.island.x, 1.2, TOWN.island.z);
   island.receiveShadow = true;
   scene.add(island);
   const sandRing = new THREE.Mesh(
-    new THREE.CylinderGeometry(CITY.island.radius + 4, CITY.island.radius + 8, 1.2, 28),
-    mat(PALETTE.sand, { roughness: 1 }),
+    new THREE.CylinderGeometry(TOWN.island.radius + 4, TOWN.island.radius + 8, 1.2, 28),
+    shade(HUES.sand, { roughness: 1 }),
   );
-  sandRing.position.set(CITY.island.x, 0.4, CITY.island.z);
+  sandRing.position.set(TOWN.island.x, 0.4, TOWN.island.z);
   scene.add(sandRing);
 
   const ferris = new THREE.Group();
@@ -462,35 +462,35 @@ export function buildWorld(scene) {
   );
   wheel.add(rim);
   for (let i = 0; i < 8; i++) {
-    const spoke = cyl(0.28, 0.28, 31, 0xd8d8e8, {}, 6);
+    const spoke = tube(0.28, 0.28, 31, 0xd8d8e8, {}, 6);
     spoke.rotation.z = (i / 8) * Math.PI;
     wheel.add(spoke);
   }
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    const cabin = box(2.4, 2.4, 2.4, pick(rng, [0xff7ab8, 0x14e0c8, 0xffb020, 0x9fd8ff]));
+    const cabin = block(2.4, 2.4, 2.4, choose(rng, [0xff7ab8, 0x14e0c8, 0xffb020, 0x9fd8ff]));
     cabin.position.set(Math.cos(a) * 16, Math.sin(a) * 16, 0);
     wheel.add(cabin);
   }
   wheel.position.y = 22;
   ferris.add(wheel);
-  const legA = cyl(0.6, 0.9, 24, 0x8a8496, {}, 6);
+  const legA = tube(0.6, 0.9, 24, 0x8a8496, {}, 6);
   legA.position.set(-7, 11, 0); legA.rotation.z = 0.3;
   ferris.add(legA);
   const legB = legA.clone(); legB.position.x = 7; legB.rotation.z = -0.3;
   ferris.add(legB);
-  ferris.position.set(CITY.island.x + 18, 2.4, CITY.island.z - 6);
+  ferris.position.set(TOWN.island.x + 18, 2.4, TOWN.island.z - 6);
   scene.add(ferris);
   animated.ferris = wheel;
 
   const lighthouse = new THREE.Group();
-  const tower = cyl(2.2, 3, 22, 0xf2ede0, {}, 12);
+  const tower = tube(2.2, 3, 22, 0xf2ede0, {}, 12);
   tower.position.y = 11;
   lighthouse.add(tower);
-  const band = cyl(2.35, 2.35, 2, 0xff5e5e, {}, 12);
+  const band = tube(2.35, 2.35, 2, 0xff5e5e, {}, 12);
   band.position.y = 15;
   lighthouse.add(band);
-  const lampRoom = cyl(1.8, 1.8, 2.4, 0x2a2d3a, {}, 8);
+  const lampRoom = tube(1.8, 1.8, 2.4, 0x2a2d3a, {}, 8);
   lampRoom.position.y = 23;
   lighthouse.add(lampRoom);
   const beacon = new THREE.Mesh(
@@ -499,11 +499,11 @@ export function buildWorld(scene) {
   );
   beacon.position.y = 23;
   lighthouse.add(beacon);
-  lighthouse.position.set(CITY.island.x - 22, 2.4, CITY.island.z + 18);
+  lighthouse.position.set(TOWN.island.x - 22, 2.4, TOWN.island.z + 18);
   scene.add(lighthouse);
 
   // ---- marina docks and moored boats --------------------------------------
-  const dockMat = mat(0x8a6a4a, { roughness: 1 });
+  const dockMat = shade(0x8a6a4a, { roughness: 1 });
   // Four docks across the marina; the last one sits at the east shore,
   // where the moored boats wait within reach of the boardwalk.
   const dockXs = [-200, -188, -176, -152];
@@ -513,34 +513,34 @@ export function buildWorld(scene) {
     dock.castShadow = true; dock.receiveShadow = true;
     scene.add(dock);
     for (let p = 0; p < 4; p++) {
-      const post = cyl(0.14, 0.14, 1.6, 0x5a4a3a, {}, 6);
+      const post = tube(0.14, 0.14, 1.6, 0x5a4a3a, {}, 6);
       post.position.set(dockXs[i] + (p % 2 === 0 ? -1.4 : 1.4), 1.2, 136 + p * 10);
       scene.add(post);
     }
   }
   // Canal bridges so the east side stays drivable.
   for (const z of [0, 120]) {
-    const cBridge = box(40, 1, 14, 0x4a4556);
+    const cBridge = block(40, 1, 14, 0x4a4556);
     cBridge.position.set(156, 0.6, z);
     scene.add(cBridge);
   }
 
   // ---- old-town hill backdrop ---------------------------------------------
   const hill = new THREE.Mesh(
-    new THREE.ConeGeometry(CITY.hill.radius, CITY.hill.height, 24, 6),
-    mat(0x5a6a52, { roughness: 1 }),
+    new THREE.ConeGeometry(TOWN.hill.radius, TOWN.hill.height, 24, 6),
+    shade(0x5a6a52, { roughness: 1 }),
   );
-  hill.position.set(CITY.hill.x, CITY.hill.height / 2 - 2, CITY.hill.z);
+  hill.position.set(TOWN.hill.x, TOWN.hill.height / 2 - 2, TOWN.hill.z);
   scene.add(hill);
   for (let i = 0; i < 10; i++) {
-    const h = box(range(rng, 6, 10), range(rng, 5, 9), range(rng, 6, 10), pick(rng, facadeColors));
+    const h = block(between(rng, 6, 10), between(rng, 5, 9), between(rng, 6, 10), choose(rng, facadeColors));
     const a = rng() * Math.PI * 2;
-    const r = range(rng, 30, 110);
-    h.position.set(CITY.hill.x + Math.cos(a) * r, 18 + rng() * 8, CITY.hill.z + Math.sin(a) * r);
+    const r = between(rng, 30, 110);
+    h.position.set(TOWN.hill.x + Math.cos(a) * r, 18 + rng() * 8, TOWN.hill.z + Math.sin(a) * r);
     scene.add(h);
   }
-  const church = box(8, 26, 8, 0xe8dcc8);
-  church.position.set(CITY.hill.x + 20, 30, CITY.hill.z - 10);
+  const church = block(8, 26, 8, 0xe8dcc8);
+  church.position.set(TOWN.hill.x + 20, 30, TOWN.hill.z - 10);
   scene.add(church);
 
   // ---- traffic loops (rectangular circuits around blocks) -----------------
@@ -558,5 +558,5 @@ export function buildWorld(scene) {
     loops.push(pts);
   }
 
-  return { colliders, parkedCars, loops, sidewalkSpots, animated, isWater, groundHeightAt };
+  return { colliders, parkedCars, loops, sidewalkSpots, animated, inWater, floorAt };
 }

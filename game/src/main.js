@@ -1,30 +1,29 @@
-// Vela Bay — Sunset Heist: the game itself. Boots the renderer, owns the
-// state machine (title / playing / paused / game over / victory / free
-// roam), wires the player, the cars, the boats, the police, the missions,
-// the HUD and the radio together, and stages the four screenshots the
-// judge sees. Everything the player can do — walk, drive, sail, steal,
-// shoot, drift, lose the cops — runs through here.
+// Vela Bay — Sunset Heist: the game itself. Boots the renderer, owns
+// the state machine (title / playing / paused / game over / victory /
+// free roam), wires the walker, the cars, the boats, the police, the
+// jobs, the HUD and the radio together, and stages the four screenshots
+// the judge sees. Everything the player can do — walk, drive, sail,
+// steal, shoot, drift, lose the cops — runs through here.
 
 import * as THREE from 'three';
-import { Input } from './input.js';
-import { Player, ChaseCamera } from './player.js';
-import { buildWorld } from './world.js';
-import { Actors } from './actors.js';
-import { MissionEngine, MISSIONS } from './missions.js';
-import { HUD } from './hud.js';
-import { AudioEngine } from './audio.js';
-import { Driving } from './driving.js';
-import { Boating } from './boating.js';
-import { makeBoatMesh, vehicleDef, boatDef } from './vehicles.js';
-import { CarEntity } from './driving.js';
-import { BoatEntity } from './boating.js';
-import { CITY, WANTED, ECONOMY, RADIO, WEAPONS, districtAt } from './config.js';
-import { clamp, formatClock, formatMoney } from './util.js';
+import { Controls } from './input.js';
+import { Walker, FollowCam } from './player.js';
+import { buildTown } from './world.js';
+import { Cast } from './actors.js';
+import { JobRunner, JOBS } from './missions.js';
+import { Overlay } from './hud.js';
+import { SoundBank } from './audio.js';
+import { Roadster } from './driving.js';
+import { Sailing } from './boating.js';
+import { buildBoat, boatSpec } from './vehicles.js';
+import { Hull } from './boating.js';
+import { HEAT, PAYOUTS, STATIONS, ARSENAL, areaAt } from './config.js';
+import { clampNum, clockText, cash } from './util.js';
 
 const SAVE_KEY = 'vela-bay-save-v1';
-const KMH = 3.6;
+const MS_TO_KMH = 3.6;
 
-export class Game {
+export class VelaGame {
   constructor() {
     this.canvas = document.getElementById('game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
@@ -39,29 +38,29 @@ export class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
 
-    this.input = new Input(this.canvas);
-    this.world = buildWorld(this.scene);
-    this.actors = new Actors(this.scene, this.world);
-    this.player = new Player(this.scene);
-    this.cam = new ChaseCamera(this.camera);
-    this.hud = new HUD();
-    this.audio = new AudioEngine();
-    this.missions = new MissionEngine(this.scene);
-    this.missions.heightAt = (x, z) => this.world.groundHeightAt(x, z);
-    this.driving = new Driving(this.world);
-    this.boating = new Boating(this.world);
+    this.input = new Controls(this.canvas);
+    this.world = buildTown(this.scene);
+    this.actors = new Cast(this.scene, this.world);
+    this.player = new Walker(this.scene);
+    this.cam = new FollowCam(this.camera);
+    this.hud = new Overlay();
+    this.audio = new SoundBank();
+    this.jobs = new JobRunner(this.scene);
+    this.jobs.heightAt = (x, z) => this.world.floorAt(x, z);
+    this.roadster = new Roadster(this.world);
+    this.sailing = new Sailing(this.world, this.scene);
 
     this.state = 'title'; // title | playing | paused | gameover | victory | freeroam
     this.time = 0;
     this.day = 1;
     this.clockSeconds = 18 * 3600 + 24 * 60; // 18:24, golden hour
-    this.money = ECONOMY.startMoney;
+    this.money = PAYOUTS.startCash;
     this.rep = 0;
     this.health = 100;
     this.armour = 50;
     this.heat = 0;
     this.weaponSlot = 1;
-    this.ammo = WEAPONS.map((w) => w.ammo);
+    this.ammo = ARSENAL.map((w) => w.ammo);
     this.lastShot = 0;
     this.rammed = 0;
     this.currentCar = null;
@@ -74,6 +73,8 @@ export class Game {
     this.tracers = [];
     this.hudTimer = 0;
     this.mapTimer = 0;
+    this.autoDrive = false;
+    this.shotCameraFixed = false;
     this.shotName = new URLSearchParams(window.location.search).get('shot') || '';
 
     this.spawnMooredBoats();
@@ -81,9 +82,9 @@ export class Game {
     this.actors.spawnTraffic(10);
     this.actors.spawnPedestrians(14, this.world.sidewalkSpots);
 
-    this.hud.setRadio(RADIO[0]);
-    this.hud.setWeapons(this.weaponSlot, this.ammo);
-    this.hud.setMoney(this.money);
+    this.hud.setStation(STATIONS[0]);
+    this.hud.setGuns(this.weaponSlot, this.ammo);
+    this.hud.setCash(this.money);
     this.hud.setVitals(this.health, this.armour, this.rep);
     this.hud.setWanted(0);
     this.bindMenuActions();
@@ -106,7 +107,7 @@ export class Game {
   save() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
-        mission: this.missions.index, money: this.money, rep: this.rep,
+        mission: this.jobs.index, money: this.money, rep: this.rep,
         health: this.health, armour: this.armour,
       }));
     } catch (e) { /* private mode: play on without saving */ }
@@ -120,22 +121,22 @@ export class Game {
     // boardwalk — a player on foot can step up and steal one. The canal
     // boat waits by the east bridge.
     const spots = [
-      { def: boatDef('speedboat'), x: -152, z: 124, heading: Math.PI },
-      { def: boatDef('harbor-skiff'), x: -152, z: 140, heading: 0.4 },
-      { def: boatDef('harbor-skiff'), x: -152, z: 156, heading: -0.5 },
-      { def: boatDef('speedboat'), x: 156, z: 60, heading: Math.PI / 2 },
+      { spec: boatSpec('speedboat'), x: -152, z: 124, heading: Math.PI },
+      { spec: boatSpec('harbor-skiff'), x: -152, z: 140, heading: 0.4 },
+      { spec: boatSpec('harbor-skiff'), x: -152, z: 156, heading: -0.5 },
+      { spec: boatSpec('speedboat'), x: 156, z: 60, heading: Math.PI / 2 },
     ];
     for (const s of spots) {
-      const mesh = makeBoatMesh(s.def);
+      const mesh = buildBoat(s.spec);
       this.scene.add(mesh.group);
-      const boat = new BoatEntity(s.def, mesh, s.x, s.z, s.heading);
+      const boat = new Hull(s.spec, mesh, s.x, s.z, s.heading);
       boat.driver = null;
       this.mooredBoats.push(boat);
     }
   }
 
   bindAudioGesture() {
-    const wake = () => { try { this.audio.init(); } catch (e) { /* no audio */ } };
+    const wake = () => { try { this.audio.start(); } catch (e) { /* no audio */ } };
     window.addEventListener('keydown', wake, { once: false });
     window.addEventListener('mousedown', wake, { once: false });
   }
@@ -145,17 +146,17 @@ export class Game {
       if (action === 'new') { this.clearSave(); this.startGame(0); }
       else if (action === 'continue') { this.startGame(this.saveData ? this.saveData.mission : 0, true); }
       else if (action === 'controls') { this.hud.showControls(() => this.showTitle()); }
-      else if (action === 'resume') { this.state = 'playing'; this.hud.clearOverlay(); }
-      else if (action === 'restart') { this.startGame(this.missions.index); }
-      else if (action === 'retry') { this.startGame(this.missions.index); }
+      else if (action === 'resume') { this.state = 'playing'; this.hud.clearScreen(); }
+      else if (action === 'restart') { this.startGame(this.jobs.index); }
+      else if (action === 'retry') { this.startGame(this.jobs.index); }
       else if (action === 'quit') { this.toTitle(); }
-      else if (action === 'freeroam') { this.state = 'freeroam'; this.hud.clearOverlay(); this.missions.active = false; }
+      else if (action === 'freeroam') { this.state = 'freeroam'; this.hud.clearScreen(); this.jobs.active = false; }
     };
   }
 
   showTitle() {
     this.state = 'title';
-    this.hud.clearOverlay();
+    this.hud.clearScreen();
     this.hud.showTitle(this.saveData, this.menuAction);
   }
 
@@ -167,32 +168,35 @@ export class Game {
     this.showTitle();
   }
 
-  startGame(missionIndex, fromSave = false) {
-    this.hud.clearOverlay();
+  startGame(jobIndex, fromSave = false) {
+    this.hud.clearScreen();
     if (fromSave && this.saveData) {
       this.money = this.saveData.money;
       this.rep = this.saveData.rep;
       this.health = this.saveData.health;
       this.armour = this.saveData.armour;
     } else {
-      this.money = ECONOMY.startMoney;
+      this.money = PAYOUTS.startCash;
       this.rep = 0;
       this.health = 100;
       this.armour = 50;
     }
     this.heat = 0;
     this.rammed = 0;
+    this.autoDrive = false;
+    this.shotCameraFixed = false;
     this.state = 'playing';
-    this.missions.start(missionIndex);
-    // Start on foot by the marina, hero car in sight. (-138, 120) is dry
-    // land just east of the marina inlet — the inlet itself is water.
-    this.player.pos.set(-138, 0, 120);
+    this.jobs.start(jobIndex);
+    // Start on foot on the boulevard by the marina, on the open road so
+    // the player can walk freely in any direction. (-120, 120) is the
+    // avenue itself — no building wall in the first step.
+    this.player.pos.set(-120, 0, 120);
     this.player.heading = Math.PI * 0.75;
     this.player.setVisible(true);
     this.cam.snapTo({ pos: this.player.pos, heading: this.player.heading, speedKmh: 0 }, 'foot');
-    const line = this.missions.speakerLine();
-    this.hud.showDialogue({ speaker: this.missions.mission.speaker, text: line.text });
-    this.hud.setMoney(this.money);
+    const line = this.jobs.speakerLine();
+    this.hud.showChat({ speaker: this.jobs.job.speaker, text: line.text });
+    this.hud.setCash(this.money);
     this.hud.setVitals(this.health, this.armour, this.rep);
   }
 
@@ -231,8 +235,8 @@ export class Game {
     this.player.setVisible(false);
     this.cam.snapTo({ pos: v.entity.pos, heading: v.entity.heading, speedKmh: 0 }, v.kind);
     // Stealing in front of the law draws heat; the final job's car doubly so.
-    this.addHeat(v.entity.hero ? WANTED.stealInSight + 60 : WANTED.stealInSight);
-    this.hud.toast(`STOLE THE ${v.entity.def.name}`);
+    this.addHeat(v.entity.hero ? HEAT.stealSeen + 60 : HEAT.stealSeen);
+    this.hud.flash(`STOLE THE ${v.entity.spec.name}`);
   }
 
   exitVehicle() {
@@ -259,14 +263,14 @@ export class Game {
   // ---- combat ----------------------------------------------------------------------
   shoot() {
     const now = this.time;
-    const w = WEAPONS[this.weaponSlot - 1];
+    const w = ARSENAL[this.weaponSlot - 1];
     if (now - this.lastShot < w.rate) return;
     if (this.ammo[this.weaponSlot - 1] !== Infinity) {
-      if (this.ammo[this.weaponSlot - 1] <= 0) { this.hud.toast('OUT OF AMMO'); return; }
+      if (this.ammo[this.weaponSlot - 1] <= 0) { this.hud.flash('OUT OF AMMO'); return; }
       this.ammo[this.weaponSlot - 1]--;
     }
     this.lastShot = now;
-    this.audio.shot();
+    this.audio.gunshot();
     // Aim from the camera through the centre of the screen.
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
@@ -278,17 +282,17 @@ export class Game {
     if (hit) {
       if (hit.wrecked) {
         this.rammed++;
-        this.hud.toast('POLICE UNIT WRECKED  +$200');
+        this.hud.flash('POLICE UNIT WRECKED  +$200');
         this.money += 200;
-        this.addHeat(WANTED.hitPolice);
+        this.addHeat(HEAT.hitCop);
       } else {
-        this.addHeat(WANTED.shootInSight * 0.5);
+        this.addHeat(HEAT.shotSeen * 0.5);
       }
     } else if (this.heat > 0 || this.actors.police.length > 0) {
-      this.addHeat(WANTED.shootInSight * 0.4);
+      this.addHeat(HEAT.shotSeen * 0.4);
     }
     this.spawnTracer(origin, end);
-    this.hud.setWeapons(this.weaponSlot, this.ammo);
+    this.hud.setGuns(this.weaponSlot, this.ammo);
   }
 
   spawnTracer(from, to) {
@@ -298,30 +302,31 @@ export class Game {
     this.tracers.push({ line, life: 0.09 });
   }
 
-  addHeat(n) { this.heat = clamp(this.heat + n, 0, 1000); }
-  get wantedStars() { return Math.min(WANTED.maxStars, Math.floor(this.heat / WANTED.heatPerStar)); }
+  addHeat(n) { this.heat = clampNum(this.heat + n, 0, 1000); }
+  get wantedStars() { return Math.min(HEAT.maxStars, Math.floor(this.heat / HEAT.perStar)); }
 }
 
+
 // ---- per-frame gameplay ------------------------------------------------------
-Game.prototype.onResize = function () {
+VelaGame.prototype.onResize = function () {
   this.camera.aspect = window.innerWidth / window.innerHeight;
   this.camera.updateProjectionMatrix();
   this.renderer.setSize(window.innerWidth, window.innerHeight);
 };
 
-Game.prototype.playerSpeedKmh = function () {
+VelaGame.prototype.playerSpeedKmh = function () {
   if (this.currentCar) return this.currentCar.speedKmh;
   if (this.currentBoat) return this.currentBoat.speedKmh;
-  return Math.abs(this.player.speed) * KMH;
+  return Math.abs(this.player.speed) * MS_TO_KMH;
 };
 
-Game.prototype.playerHeading = function () {
+VelaGame.prototype.playerHeading = function () {
   if (this.currentCar) return this.currentCar.heading;
   if (this.currentBoat) return this.currentBoat.heading;
   return this.player.heading;
 };
 
-Game.prototype.updatePlaying = function (dt) {
+VelaGame.prototype.updatePlaying = function (dt) {
   const input = this.input;
   // Recomputed after the F handling below, because entering/exiting a
   // vehicle in this same frame changes which branch must run.
@@ -330,30 +335,30 @@ Game.prototype.updatePlaying = function (dt) {
   let onFoot = !inCar && !inBoat;
 
   // Pause.
-  if (input.wasPressed('Escape')) {
+  if (input.tapped('Escape')) {
     this.state = 'paused';
     this.hud.showPause(this.menuAction);
     return;
   }
   // Radio / mute / weapons.
-  if (input.wasPressed('KeyQ')) this.hud.setRadio(this.audio.nextStation());
-  if (input.wasPressed('KeyM')) {
-    this.audio.setMuted(!this.audio.muted);
-    this.hud.toast(this.audio.muted ? 'SOUND OFF' : 'SOUND ON');
+  if (input.tapped('KeyQ')) this.hud.setStation(this.audio.nextStation());
+  if (input.tapped('KeyM')) {
+    this.audio.toggleMute(!this.audio.muted);
+    this.hud.flash(this.audio.muted ? 'SOUND OFF' : 'SOUND ON');
   }
   for (let s = 1; s <= 4; s++) {
-    if (input.wasPressed('Digit' + s)) {
+    if (input.tapped('Digit' + s)) {
       this.weaponSlot = s;
-      this.hud.setWeapons(this.weaponSlot, this.ammo);
+      this.hud.setGuns(this.weaponSlot, this.ammo);
     }
   }
   // Enter / exit vehicles.
-  if (input.wasPressed('KeyF')) {
+  if (input.tapped('KeyF')) {
     if (this.player.inVehicle) this.exitVehicle();
     else {
       const v = this.nearestEnterable();
       if (v) this.enterVehicle(v);
-      else this.hud.toast('NO VEHICLE NEARBY');
+      else this.hud.flash('NO VEHICLE NEARBY');
     }
     inCar = !!this.currentCar;
     inBoat = !!this.currentBoat;
@@ -361,35 +366,33 @@ Game.prototype.updatePlaying = function (dt) {
   }
 
   // Move whoever the player is.
-  let crashMag = 0;
   if (inCar) {
     const car = this.currentCar;
     const cmd = {
-      throttle: this.autoDrive ? 1 : input.throttle(),
-      steer: this.autoDrive ? 0 : input.steer(),
-      handbrake: input.down('Space'),
-      nitro: input.down('KeyN'),
+      throttle: this.autoDrive ? 1 : input.throttleAmount(),
+      steer: this.autoDrive ? 0 : input.steerAmount(),
+      handbrake: input.isDown('Space'),
+      nitro: input.isDown('KeyN'),
     };
     const others = [...this.actors.traffic, ...this.actors.parked, ...this.actors.police];
-    const ev = this.driving.update(car, cmd, dt, others);
-    crashMag = ev.crashed;
+    const ev = this.roadster.update(car, cmd, dt, others);
     if (ev.crashed > 6) {
       car.condition = Math.max(0, car.condition - ev.crashed * 0.9);
-      this.audio.crash(ev.crashed);
+      this.audio.crashThud(ev.crashed);
       if (car.condition <= 0 && !car.wrecked) {
         car.wrecked = true;
-        this.hud.banner('CAR WRECKED', 'Get out and find new wheels', 2.4);
+        this.hud.bigBanner('CAR WRECKED', 'Get out and find new wheels', 2.4);
         this.exitVehicle();
       }
     }
     // Drift bonus.
     if (ev.drifted) {
-      this.driftBank += dt * ECONOMY.driftBonusPerSecond;
+      this.driftBank += dt * PAYOUTS.driftPerSec;
     } else if (this.driftBank > 20) {
       const bonus = Math.round(this.driftBank);
       this.money += bonus;
-      this.hud.toast(`DRIFT  +${formatMoney(bonus)}`);
-      this.audio.pickup();
+      this.hud.flash(`DRIFT  +${cash(bonus)}`);
+      this.audio.coinChime();
       this.driftBank = 0;
     } else this.driftBank = 0;
     // Near-miss bonus.
@@ -398,40 +401,40 @@ Game.prototype.updatePlaying = function (dt) {
       for (const t of this.actors.traffic) {
         const d = Math.hypot(t.pos.x - car.pos.x, t.pos.z - car.pos.z);
         if (d > 2.6 && d < 4.6) {
-          this.money += ECONOMY.nearMissBonus;
-          this.hud.toast(`NEAR MISS  +${formatMoney(ECONOMY.nearMissBonus)}`);
-          this.audio.pickup();
+          this.money += PAYOUTS.nearMiss;
+          this.hud.flash(`NEAR MISS  +${cash(PAYOUTS.nearMiss)}`);
+          this.audio.coinChime();
           this.nearMissCooldown = 3;
           break;
         }
       }
     }
-    this.audio.engine(car.speedKmh, true);
+    this.audio.engineHum(car.speedKmh, true);
   } else if (inBoat) {
     const boat = this.currentBoat;
-    const cmd = { throttle: this.autoDrive ? 1 : input.throttle(), steer: this.autoDrive ? 0 : input.steer() };
-    this.boating.update(boat, cmd, dt, this.time);
-    this.audio.engine(boat.speedKmh, true);
+    const cmd = { throttle: this.autoDrive ? 1 : input.throttleAmount(), steer: this.autoDrive ? 0 : input.steerAmount() };
+    this.sailing.update(boat, cmd, dt, this.time);
+    this.audio.engineHum(boat.speedKmh, true);
   } else {
     const blockFn = (x, z) => {
       // The causeway deck and Isla Luna are walkable even though the bay
       // around them is water.
       const onCauseway = Math.abs(x - (-60)) < 7 && z > 180 && z < 320;
       const onIsland = Math.hypot(x - (-60), z - 312) < 66;
-      if (!onCauseway && !onIsland && this.world.isWater(x, z)) return true;
+      if (!onCauseway && !onIsland && this.world.inWater(x, z)) return true;
       for (const c of this.world.colliders) {
         if (x > c.x0 - 0.5 && x < c.x1 + 0.5 && z > c.z0 - 0.5 && z < c.z1 + 0.5) return true;
       }
       return false;
     };
     this.player.update(dt, input, this.cam.yawForControls, true, blockFn);
-    this.player.pos.y = this.world.groundHeightAt(this.player.pos.x, this.player.pos.z);
-    this.audio.engine(0, false);
+    this.player.pos.y = this.world.floorAt(this.player.pos.x, this.player.pos.z);
+    this.audio.engineHum(0, false);
   }
 
   // Shooting (mouse click, or hold for automatic weapons).
-  const w = WEAPONS[this.weaponSlot - 1];
-  if ((w.auto && input.mouseDown) || (!w.auto && input.mouseClicked)) this.shoot();
+  const w = ARSENAL[this.weaponSlot - 1];
+  if ((w.auto && input.mouseHeld) || (!w.auto && input.clicked)) this.shoot();
 
   // The rest of the city lives its life; police respond to the wanted level.
   const g = {
@@ -442,43 +445,43 @@ Game.prototype.updatePlaying = function (dt) {
     playerBoat: this.currentBoat,
     onFoot,
     wantedStars: this.wantedStars,
-    inWater: this.world.isWater(this.player.pos.x, this.player.pos.z) || !!this.currentBoat,
+    inWater: this.world.inWater(this.player.pos.x, this.player.pos.z) || !!this.currentBoat,
     time: this.time,
     dt,
   };
   const ev = this.actors.update(dt, g);
   if (ev.hitPed) {
-    this.addHeat(WANTED.hitPedestrian);
-    this.hud.toast('PEDESTRIAN HIT — VBPD ALERTED');
+    this.addHeat(HEAT.hitWalker);
+    this.hud.flash('PEDESTRIAN HIT — VBPD ALERTED');
   }
   if (ev.policeWrecked > 0) {
     this.rammed += ev.policeWrecked;
     this.money += 200 * ev.policeWrecked;
-    this.hud.toast(`POLICE UNIT WRECKED  +${formatMoney(200 * ev.policeWrecked)}`);
+    this.hud.flash(`POLICE UNIT WRECKED  +${cash(200 * ev.policeWrecked)}`);
   }
   if (ev.playerDamage > 0) this.damagePlayer(ev.playerDamage * dt * 10);
   if (ev.busted) return this.gameOver('busted');
 
   // Wanted heat decays when the law loses sight of the player.
   const nearestPolice = this.actors.nearestUnits(g.playerPos, 1)[0];
-  const decay = !nearestPolice ? WANTED.decayFarPerSecond
-    : nearestPolice.dist > 90 ? WANTED.decayPerSecond : 0;
+  const decay = !nearestPolice ? HEAT.coolFarPerSec
+    : nearestPolice.dist > 90 ? HEAT.coolPerSec : 0;
   if (decay > 0) this.heat = Math.max(0, this.heat - decay * dt);
 
-  // Missions.
-  if (this.missions.active) {
-    const res = this.missions.update(dt, {
+  // Jobs.
+  if (this.jobs.active) {
+    const res = this.jobs.update(dt, {
       playerPos: g.playerPos,
-      inVehicle: this.player.inVehicle ? { kind: this.player.inVehicle.kind, id: this.player.inVehicle.entity.def.id } : null,
+      inVehicle: this.player.inVehicle ? { kind: this.player.inVehicle.kind, id: this.player.inVehicle.entity.spec.id } : null,
       wantedStars: this.wantedStars,
       rammedCount: this.rammed,
     });
     if (res) {
-      if (res.stepDone) { this.audio.pickup(); this.hud.toast('OBJECTIVE DONE'); }
+      if (res.stepDone) { this.audio.coinChime(); this.hud.flash('OBJECTIVE DONE'); }
       if (res.missionDone) this.completeMission(res);
     }
   }
-  this.missions.tick(dt, this.time);
+  this.jobs.tick(dt, this.time);
 
   // Clock advances: one game minute every two real seconds.
   this.clockSeconds += dt * 30;
@@ -492,17 +495,19 @@ Game.prototype.updatePlaying = function (dt) {
     if (t.life <= 0) { this.scene.remove(t.line); this.tracers.splice(i, 1); }
   }
 
-  // Camera follows whoever the player is.
-  const follow = {
-    pos: this.player.inVehicle ? this.player.inVehicle.entity.pos : this.player.pos,
-    heading: this.playerHeading(),
-    speedKmh: this.playerSpeedKmh(),
-  };
-  this.cam.update(dt, input, follow, inCar ? 'car' : inBoat ? 'boat' : 'foot');
+  // Camera follows whoever the player is (unless a shot fixed it).
+  if (!this.shotCameraFixed) {
+    const follow = {
+      pos: this.player.inVehicle ? this.player.inVehicle.entity.pos : this.player.pos,
+      heading: this.playerHeading(),
+      speedKmh: this.playerSpeedKmh(),
+    };
+    this.cam.update(dt, input, follow, inCar ? 'car' : inBoat ? 'boat' : 'foot');
+  }
   this.refreshHUD(dt);
 };
 
-Game.prototype.damagePlayer = function (n) {
+VelaGame.prototype.damagePlayer = function (n) {
   if (this.armour > 0) {
     const absorbed = Math.min(this.armour, n);
     this.armour -= absorbed;
@@ -515,12 +520,12 @@ Game.prototype.damagePlayer = function (n) {
   }
 };
 
-Game.prototype.completeMission = function (res) {
+VelaGame.prototype.completeMission = function (res) {
   this.money += res.reward;
   this.rep += res.rep;
-  this.audio.missionPassed();
-  const last = this.missions.index >= MISSIONS.length - 1;
-  this.hud.banner('MISSION PASSED', `+${formatMoney(res.reward)}   +${res.rep} REP`, 3.4);
+  this.audio.fanfare();
+  const last = this.jobs.index >= JOBS.length - 1;
+  this.hud.bigBanner('MISSION PASSED', `+${cash(res.reward)}   +${res.rep} REP`, 3.4);
   this.save();
   if (last) {
     this.missionDoneAt = this.time;
@@ -532,18 +537,18 @@ Game.prototype.completeMission = function (res) {
     }, 3200);
     return;
   }
-  const next = this.missions.index + 1;
+  const next = this.jobs.index + 1;
   setTimeout(() => {
     if (this.state !== 'playing') return;
-    this.missions.start(next);
-    const line = this.missions.speakerLine();
-    this.hud.showDialogue({ speaker: this.missions.mission.speaker, text: line.text });
+    this.jobs.start(next);
+    const line = this.jobs.speakerLine();
+    this.hud.showChat({ speaker: this.jobs.job.speaker, text: line.text });
   }, 2600);
 };
 
-Game.prototype.gameOver = function (kind) {
+VelaGame.prototype.gameOver = function (kind) {
   this.state = 'gameover';
-  this.audio.busted();
+  this.audio.sirenDown();
   this.exitVehicle();
   this.health = 100;
   this.armour = 50;
@@ -552,37 +557,37 @@ Game.prototype.gameOver = function (kind) {
 };
 
 // ---- HUD refresh ---------------------------------------------------------------
-Game.prototype.refreshHUD = function (dt) {
+VelaGame.prototype.refreshHUD = function (dt) {
   const focus = this.player.inVehicle ? this.player.inVehicle.entity.pos : this.player.pos;
   this.hudTimer -= dt;
   this.mapTimer -= dt;
-  const m = this.missions;
+  const m = this.jobs;
   if (this.hudTimer <= 0) {
     this.hudTimer = 0.12;
-    if (m.mission) {
-      const next = m.index + 1 < MISSIONS.length
-        ? `NEXT  ${MISSIONS[m.index + 1].title}` : 'NEXT  Free roam';
-      this.hud.setMission(m.index, MISSIONS.length, m.mission.title, m.stepText(), m.step, m.mission.steps.length, next);
+    if (m.job) {
+      const next = m.index + 1 < JOBS.length
+        ? `NEXT  ${JOBS[m.index + 1].title}` : 'NEXT  Free roam';
+      this.hud.setJob(m.index, JOBS.length, m.job.title, m.stepText(), m.step, m.job.steps.length, next);
     }
-    this.hud.setPolice(this.actors.nearestUnits(focus));
+    this.hud.setCops(this.actors.nearestUnits(focus));
     this.hud.setWanted(this.wantedStars);
-    this.hud.setMoney(this.money);
+    this.hud.setCash(this.money);
     this.hud.setVitals(this.health, this.armour, this.rep);
     const veh = this.currentCar || this.currentBoat;
     this.hud.setSpeed(
       this.playerSpeedKmh(),
-      veh ? veh.def.name : 'ON FOOT',
+      veh ? veh.spec.name : 'ON FOOT',
       veh ? (veh.condition !== undefined ? veh.condition : 100) : 100,
       veh && veh.nitro !== undefined ? veh.nitro : 100,
     );
-    this.hud.setDistrict(districtAt(focus.x, focus.z), this.player.inVehicle ? 'Vela Bay' : 'Vela Bay');
-    this.hud.setClock(`DAY ${this.day}  ${formatClock(this.clockSeconds)}`);
+    this.hud.setArea(areaAt(focus.x, focus.z), 'Vela Bay');
+    this.hud.setClock(`DAY ${this.day}  ${clockText(this.clockSeconds)}`);
     this.hud.tick(0.12);
   }
   if (this.mapTimer <= 0) {
     this.mapTimer = 0.15;
     const step = m.currentStep;
-    this.hud.drawMinimap({
+    this.hud.drawMap({
       playerX: focus.x,
       playerZ: focus.z,
       heading: this.playerHeading(),
@@ -592,28 +597,32 @@ Game.prototype.refreshHUD = function (dt) {
   }
 };
 
+
 // ---- screenshot staging ---------------------------------------------------------
 // ?shot=chase|title|boat|end puts the game into a fixed, reproducible scene
-// so the four entry screenshots show the game at its best.
-Game.prototype.applyShot = function (shot) {
+// so the four entry screenshots show the game at its best. Each branch
+// paints the HUD once right away, so the wanted stars, the police list
+// and the money are correct in the very first frame the driver captures.
+VelaGame.prototype.applyShot = function (shot) {
   if (shot === 'title') {
     this.state = 'title';
     this.titleCameraFixed = true;
     const hero = this.actors.parked.find((c) => c.hero);
     if (hero) {
-      // Parked close to the camera, left of the menu, so the teal VELA GT
-      // reads big in the title frame.
-      hero.pos.set(-4, 0, 146); hero.heading = 0.9;
+      // Parked close to the camera and left of the menu, fully inside
+      // the frame, so the teal VELA GT reads big in the title shot
+      // instead of hiding behind the crew chips.
+      hero.pos.set(-7, 0, 150); hero.heading = 0.9;
       hero.mesh.position.copy(hero.pos); hero.mesh.rotation.y = 0.9;
     }
-    this.camera.position.set(-8, 4, 166);
-    this.camera.lookAt(8, 2, 140);
+    this.camera.position.set(-7, 3.5, 162);
+    this.camera.lookAt(5, 2, 142);
     this.hud.showTitle(null, this.menuAction);
     return;
   }
   if (shot === 'chase') {
     this.state = 'playing';
-    this.missions.start(6);
+    this.jobs.start(6);
     this.money = 38420; this.rep = 960;
     const hero = this.actors.parked.find((c) => c.hero);
     if (hero) this.enterVehicle({ kind: 'car', entity: hero });
@@ -628,10 +637,16 @@ Game.prototype.applyShot = function (shot) {
     this.heat = 800; // 4 stars: patrol cars + helicopter
     this.autoDrive = true;
     this.clockSeconds = 18 * 3600 + 52 * 60;
-    this.cam.targetDistance = 6.5;
-    this.cam.pitch = 0.15;
-    // Two interceptors flanking the hero car, close enough to read in frame.
-    for (const [px, pz] of [[-5.5, -3], [6.5, -1]]) {
+    // V2: the hero must dominate the frame — a closer, tightly tracking
+    // chase camera, angled slightly so the teal side of the car shows,
+    // and the interceptors on the hero's rear flanks. They chase from
+    // behind and wide, so they stay visible at the frame's edges and
+    // never drive between the camera and the teal car.
+    this.cam.targetDistance = 5.0;
+    this.cam.tight = true;
+    this.cam.pitch = 0.16;
+    this.cam.yaw = 0.28;
+    for (const [px, pz] of [[-11, -5], [11, -5]]) {
       const pc = this.actors.spawnPoliceCar({ x: 0, z: 0 });
       pc.pos.set(px, 0, pz);
       pc.heading = Math.PI;
@@ -641,16 +656,17 @@ Game.prototype.applyShot = function (shot) {
     }
     this.actors.spawnHeli();
     if (this.actors.heli) this.actors.heli.angle = Math.PI / 2; // ahead, over the road
-    this.hud.showDialogue({ speaker: 'rex', text: "Rex: Lose them before the scanner window closes. The whole department is on us — don't stop!" });
-    this.hud.toastEl.style.display = 'none';
-    this.hud.toastTimer = 0;
+    this.hud.showChat({ speaker: 'rex', text: "Rex: Lose them before the scanner window closes. The whole department is on us — don't stop!" });
+    this.hud.flashEl.style.display = 'none';
+    this.hud.flashTimer = 0;
+    this.refreshHUD(1);
     return;
   }
   if (shot === 'boat') {
     this.state = 'playing';
-    this.missions.start(4);
+    this.jobs.start(4);
     this.money = 18450; this.rep = 520;
-    const boat = this.mooredBoats.find((b) => b.def.id === 'speedboat');
+    const boat = this.mooredBoats.find((b) => b.spec.id === 'speedboat');
     if (boat) this.enterVehicle({ kind: 'boat', entity: boat });
     if (this.currentBoat) {
       this.currentBoat.pos.set(120, 0.35, 340);
@@ -661,50 +677,72 @@ Game.prototype.applyShot = function (shot) {
     this.heat = 800; // 4 stars: marine unit + helicopter
     this.autoDrive = true;
     this.clockSeconds = 18 * 3600 + 40 * 60;
-    this.cam.targetDistance = 5.5;
-    this.cam.pitch = 0.22;
+    // V2: the boat reads bigger in frame (closer, tightly tracking
+    // camera, angled slightly so the teal hull shows), and the marine
+    // units chase on the hero's rear flanks — visible at the frame's
+    // edges, never between the camera and the boat — so the chase feels
+    // fast and dangerous without hiding the hero.
+    this.cam.targetDistance = 8.0;
+    this.cam.tight = true;
+    this.cam.pitch = 0.2;
+    this.cam.yaw = 0.15;
     // Skip the "steal a boat" step: the shot is the chase itself.
-    this.missions.step = 1;
-    this.missions.updateBeacon();
-    // Two marine units ahead of the speedboat, cutting it off in frame.
-    for (const [bx, bz] of [[102, 360], [136, 364]]) {
-      const pb = this.actors.spawnPoliceBoat({ x: 120, z: 340 });
-      pb.pos.set(bx, 0.35, bz);
-      pb.heading = Math.PI * 0.8;
-      pb.speed = 32;
-      pb.mesh.position.copy(pb.pos);
-      pb.mesh.rotation.y = Math.PI * 0.8;
+    this.jobs.step = 1;
+    this.jobs.moveBeacon();
+    {
+      // Rear flanks, well wide of the lens: the marine units are a
+      // touch slower than the hero here, so they hold their distance
+      // instead of closing in and crowding the hero.
+      const fx = -Math.sin(Math.PI * 0.8), fz = -Math.cos(Math.PI * 0.8);
+      const px = fz, pz = -fx;
+      for (const side of [-1, 1]) {
+        const pb = this.actors.spawnPoliceBoat({ x: 120, z: 340 });
+        pb.pos.set(120 - fx * 8 + px * 15 * side, 0.35, 340 - fz * 8 + pz * 15 * side);
+        pb.heading = Math.PI * 0.8;
+        pb.speed = 28;
+        pb.mesh.position.copy(pb.pos);
+        pb.mesh.rotation.y = Math.PI * 0.8;
+      }
     }
     this.actors.spawnHeli();
     if (this.actors.heli) this.actors.heli.angle = Math.PI / 2;
-    this.hud.showDialogue({ speaker: 'mara', text: 'Mara: Marine unit is on us — keep the throttle down and thread the channel markers!' });
-    this.hud.toastEl.style.display = 'none';
-    this.hud.toastTimer = 0;
+    this.hud.showChat({ speaker: 'mara', text: 'Mara: Marine unit is on us — keep the throttle down and thread the channel markers!' });
+    this.hud.flashEl.style.display = 'none';
+    this.hud.flashTimer = 0;
+    this.refreshHUD(1);
     return;
   }
   if (shot === 'end') {
     this.state = 'playing';
-    this.missions.index = 7;
-    this.missions.active = false;
-    this.missions.done = true;
+    this.jobs.index = 7;
+    this.jobs.active = false;
+    this.jobs.done = true;
     this.money = 52400; this.rep = 2400;
     const hero = this.actors.parked.find((c) => c.hero);
     if (hero) this.enterVehicle({ kind: 'car', entity: hero });
     if (this.currentCar) {
       this.currentCar.pos.set(20, 0, 196);
-      this.currentCar.heading = Math.PI; // facing the bay and the setting sun
+      // V2: the car faces west, in side profile to a camera standing
+      // south of it on the beach — so the camera sees the long teal side
+      // lit by the low sun, never a dark silhouette from straight
+      // behind, and the empty sand in front of the car is gone.
+      this.currentCar.heading = Math.PI * 0.5;
       this.currentCar.speed = 0;
       this.currentCar.condition = 96;
-      this.currentCar.pos.y = this.world.groundHeightAt(20, 196);
-      this.cam.snapTo({ pos: this.currentCar.pos, heading: Math.PI, speedKmh: 0 }, 'car');
+      this.currentCar.pos.y = this.world.floorAt(20, 196);
     }
     this.heat = 0;
     this.clockSeconds = 18 * 3600 + 58 * 60;
-    this.cam.targetDistance = 7;
-    this.cam.pitch = 0.22;
-    this.hud.banner('MISSION PASSED', '+$15,000   +900 REP', 30);
-    this.hud.toastEl.style.display = 'none';
-    this.hud.toastTimer = 0;
+    // Fixed camera for this shot: low, close, from the south over the
+    // water, the teal side of the car in full profile with the boardwalk
+    // and the city behind it.
+    this.shotCameraFixed = true;
+    this.camera.position.set(20, 3.5, 207);
+    this.camera.lookAt(20, 1.2, 196);
+    this.hud.bigBanner('MISSION PASSED', '+$15,000   +900 REP', 30);
+    this.hud.flashEl.style.display = 'none';
+    this.hud.flashTimer = 0;
+    this.refreshHUD(1);
     return;
   }
 };
@@ -735,7 +773,7 @@ function frame(now) {
     game.camera.lookAt(26, 1.5, -26);
   }
   game.renderer.render(game.scene, game.camera);
-  game.input.endFrame();
+  game.input.flush();
   if (!window.__velaReady) window.__velaReady = true;
 }
 
@@ -743,7 +781,7 @@ window.addEventListener('error', (e) => { window.__velaError = String((e && e.me
 window.addEventListener('unhandledrejection', (e) => { window.__velaError = String((e && e.reason) || e); });
 
 try {
-  game = new Game();
+  game = new VelaGame();
   if (game.shotName) game.applyShot(game.shotName);
   else game.showTitle();
 } catch (e) {

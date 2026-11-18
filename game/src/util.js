@@ -1,8 +1,9 @@
-// Small pure helpers shared by every system: a seeded random generator so the
-// city is identical on every load (screenshots stay reproducible), maths
-// helpers, and canvas-texture builders so the game needs no image files.
+// Small pure helpers shared by every system: a seeded random stream so
+// the town is identical on every load (screenshots stay reproducible),
+// maths helpers, and canvas-texture builders so the game needs no image
+// files at all.
 
-export function mulberry32(seed) {
+export function rng32(seed) {
   let a = seed >>> 0;
   return function next() {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
@@ -12,35 +13,35 @@ export function mulberry32(seed) {
   };
 }
 
-export function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
-export function range(rng, min, max) { return min + rng() * (max - min); }
-export function rangeInt(rng, min, max) { return min + Math.floor(rng() * (max - min + 1)); }
-export function clamp(v, min, max) { return v < min ? min : v > max ? max : v; }
-export function lerp(a, b, t) { return a + (b - a) * t; }
-export function damp(current, target, lambda, dt) {
-  return lerp(current, target, 1 - Math.exp(-lambda * dt));
+export function choose(rng, list) { return list[Math.floor(rng() * list.length)]; }
+export function between(rng, lo, hi) { return lo + rng() * (hi - lo); }
+export function intBetween(rng, lo, hi) { return lo + Math.floor(rng() * (hi - lo + 1)); }
+export function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+export function mix(a, b, t) { return a + (b - a) * t; }
+export function easeTo(now, goal, rate, dt) {
+  return mix(now, goal, 1 - Math.exp(-rate * dt));
 }
 
 // Shortest signed turn from angle `from` toward angle `to`.
-export function angleDelta(from, to) {
+export function turnToward(from, to) {
   let d = (to - from) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
   return d;
 }
 
-export function formatMoney(n) {
+export function cash(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
 }
 
-export function formatClock(seconds) {
+export function clockText(seconds) {
   const h = Math.floor(seconds / 3600) % 24;
   const m = Math.floor(seconds / 60) % 60;
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
-// A tiny canvas texture with a grid of lit windows, for building facades.
-export function makeWindowsTexture(rng, base, litRatio) {
+// A small canvas texture with a grid of lit windows, for building faces.
+export function windowsCanvas(rng, base, litRatio) {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 256;
   const g = c.getContext('2d');
@@ -49,7 +50,7 @@ export function makeWindowsTexture(rng, base, litRatio) {
   for (let y = 8; y < 248; y += 22) {
     for (let x = 8; x < 120; x += 18) {
       if (rng() < litRatio) {
-        g.fillStyle = pick(rng, warm);
+        g.fillStyle = choose(rng, warm);
         g.globalAlpha = 0.75 + rng() * 0.25;
       } else {
         g.fillStyle = '#1c2033';
@@ -63,7 +64,7 @@ export function makeWindowsTexture(rng, base, litRatio) {
 }
 
 // A canvas texture with big painted letters, for billboards and neon signs.
-export function makeSignTexture(lines, fg, bg, sub) {
+export function signCanvas(lines, fg, bg, sub) {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 256;
   const g = c.getContext('2d');
@@ -81,8 +82,8 @@ export function makeSignTexture(lines, fg, bg, sub) {
   return c;
 }
 
-// A soft radial glow sprite, used for the sun halo and the helicopter light.
-export function makeGlowTexture(inner, outer) {
+// A soft radial glow sprite, used for the sun halo and the helicopter beam.
+export function glowCanvas(inner, outer) {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');

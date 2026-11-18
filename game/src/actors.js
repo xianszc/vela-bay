@@ -1,27 +1,28 @@
-// Everyone else in Vela Bay: traffic cars following their loops, pedestrians
-// on the sidewalks, and the VBPD — patrol cars that chase, ram and block,
-// a helicopter from 3 stars, and marine boats from 4 stars when the player
-// is on the water. The game reads the events this returns (busted, hits,
-// police cars wrecked) to drive wanted level, health and missions.
+// Everyone else in Vela Bay: traffic cars following their loops,
+// pedestrians on the sidewalks, and the VBPD — patrol cars that chase,
+// ram and block, a helicopter from 3 stars, and marine boats from 4
+// stars when the player is on the water. The game reads the events this
+// returns (busted, hits, police cars wrecked) to drive wanted level,
+// health and missions.
 
 import * as THREE from 'three';
-import { CarEntity, Driving } from './driving.js';
-import { BoatEntity, Boating } from './boating.js';
-import { makeCarMesh, makeBoatMesh, makeHelicopterMesh, vehicleDef, boatDef } from './vehicles.js';
-import { makeCharacterMesh } from './player.js';
-import { VEHICLES, BOATS, WANTED, CITY } from './config.js';
-import { mulberry32, pick, range, clamp, angleDelta } from './util.js';
+import { Auto, Roadster } from './driving.js';
+import { Hull, Sailing } from './boating.js';
+import { buildCar, buildBoat, buildChopper, carSpec, boatSpec } from './vehicles.js';
+import { buildFigure } from './player.js';
+import { HEAT, TOWN } from './config.js';
+import { rng32, choose, between, clampNum, turnToward } from './util.js';
 
-const UNIT_NAMES = ['IBIS', 'TARPON', 'HERON', 'KESTREL', 'MARLIN', 'GULL', 'SNAPPER', 'OSPREY', 'FALCON', 'DOLPHIN'];
-const KMH = 3.6;
+const CALLSIGNS = ['EGRET', 'OSPREY', 'PELICAN', 'TERN', 'COOT', 'SANDPIPER', 'CURLEW', 'AVOCET', 'MERLIN', 'KESTREL'];
+const MS_TO_KMH = 3.6;
 
-export class Actors {
+export class Cast {
   constructor(scene, world) {
     this.scene = scene;
     this.world = world;
-    this.driving = new Driving(world);
-    this.boating = new Boating(world);
-    this.rng = mulberry32(CITY.seed + 77);
+    this.roadster = new Roadster(world);
+    this.sailing = new Sailing(world, scene);
+    this.rng = rng32(TOWN.seed + 77);
     this.traffic = [];
     this.peds = [];
     this.parked = [];
@@ -31,44 +32,43 @@ export class Actors {
     this.rammedCount = 0;
     this.bustedTimer = 0;
     this.unitSeq = 1;
-    this.smoke = [];
   }
 
   // ---- spawning -----------------------------------------------------------
-  spawnParkedCars(parkedSpots) {
-    const defs = [vehicleDef('city-sedan'), vehicleDef('bay-taxi'), vehicleDef('harbor-truck'), vehicleDef('sunset-coupe')];
-    for (const spot of parkedSpots) {
-      const def = pick(this.rng, defs);
-      const mesh = makeCarMesh(def);
+  spawnParkedCars(spots) {
+    const defs = [carSpec('city-sedan'), carSpec('bay-taxi'), carSpec('harbor-truck'), carSpec('sunset-coupe')];
+    for (const spot of spots) {
+      const spec = choose(this.rng, defs);
+      const mesh = buildCar(spec);
       this.scene.add(mesh.group);
-      const car = new CarEntity(def, mesh, spot.x, spot.z, spot.heading);
+      const car = new Auto(spec, mesh, spot.x, spot.z, spot.heading);
       car.driver = null;
       this.parked.push(car);
     }
     // The hero: the teal VELA GT, parked on the avenue by the Grand Casino
     // downtown — on the road, so it is always reachable and drivable.
-    const heroDef = vehicleDef('teal-sport');
-    const heroMesh = makeCarMesh(heroDef);
+    const heroSpec = carSpec('teal-sport');
+    const heroMesh = buildCar(heroSpec);
     this.scene.add(heroMesh.group);
-    const hero = new CarEntity(heroDef, heroMesh, -4, -26, Math.PI);
+    const hero = new Auto(heroSpec, heroMesh, -4, -26, Math.PI);
     hero.driver = null;
     hero.hero = true;
     this.parked.push(hero);
   }
 
   spawnTraffic(count) {
-    const defs = [vehicleDef('city-sedan'), vehicleDef('bay-taxi'), vehicleDef('harbor-truck'), vehicleDef('sunset-coupe')];
+    const defs = [carSpec('city-sedan'), carSpec('bay-taxi'), carSpec('harbor-truck'), carSpec('sunset-coupe')];
     for (let i = 0; i < count; i++) {
-      const def = pick(this.rng, defs);
-      const loop = pick(this.rng, this.world.loops);
-      const pt = pick(this.rng, loop);
-      const mesh = makeCarMesh(def);
+      const spec = choose(this.rng, defs);
+      const loop = choose(this.rng, this.world.loops);
+      const pt = choose(this.rng, loop);
+      const mesh = buildCar(spec);
       this.scene.add(mesh.group);
-      const car = new CarEntity(def, mesh, pt.x + range(this.rng, -2, 2), pt.z + range(this.rng, -2, 2), 0);
+      const car = new Auto(spec, mesh, pt.x + between(this.rng, -2, 2), pt.z + between(this.rng, -2, 2), 0);
       car.driver = 'traffic';
       car.loop = loop;
       car.wp = Math.floor(this.rng() * loop.length);
-      car.cruise = range(this.rng, 22, 38);
+      car.cruise = between(this.rng, 22, 38);
       this.traffic.push(car);
     }
   }
@@ -77,15 +77,15 @@ export class Actors {
     const shirts = [0xff7ab8, 0x9fd8ff, 0xffb020, 0x8fd8a8, 0xd8a0ff, 0xe8e4d8];
     const skins = [0xc98a5e, 0x8a5a3a, 0xe8b88a, 0x6a4a2a];
     for (let i = 0; i < count; i++) {
-      const c = makeCharacterMesh(pick(this.rng, shirts), 0x2a2d3a, pick(this.rng, skins));
+      const c = buildFigure(choose(this.rng, shirts), 0x2a2d3a, choose(this.rng, skins));
       this.scene.add(c.group);
-      const spot = pick(this.rng, spots);
+      const spot = choose(this.rng, spots);
       const ped = {
         mesh: c.group, legs: c.legs, arms: c.arms,
         pos: c.group.position,
         heading: this.rng() * Math.PI * 2,
-        speed: range(this.rng, 1.2, 2.2),
-        target: { x: spot.x + range(this.rng, -14, 14), z: spot.z + range(this.rng, -14, 14) },
+        speed: between(this.rng, 1.2, 2.2),
+        target: { x: spot.x + between(this.rng, -14, 14), z: spot.z + between(this.rng, -14, 14) },
         phase: this.rng() * 10,
         down: 0, flee: 0,
       };
@@ -95,15 +95,15 @@ export class Actors {
   }
 
   spawnPoliceCar(near) {
-    const def = vehicleDef('police-interceptor');
-    const mesh = makeCarMesh(def);
+    const spec = carSpec('police-interceptor');
+    const mesh = buildCar(spec);
     this.scene.add(mesh.group);
     const a = this.rng() * Math.PI * 2;
-    const x = clamp(near.x + Math.cos(a) * 65, -190, 190);
-    const z = clamp(near.z + Math.sin(a) * 65, -190, 190);
-    const car = new CarEntity(def, mesh, x, z, a);
+    const x = clampNum(near.x + Math.cos(a) * 65, -190, 190);
+    const z = clampNum(near.z + Math.sin(a) * 65, -190, 190);
+    const car = new Auto(spec, mesh, x, z, a);
     car.driver = 'police';
-    car.unitName = pick(this.rng, UNIT_NAMES) + '-' + (10 + this.unitSeq++);
+    car.unitName = choose(this.rng, CALLSIGNS) + '-' + (10 + this.unitSeq++);
     car.mode = 'pursuit';
     car.roadblockAt = null;
     this.police.push(car);
@@ -111,13 +111,13 @@ export class Actors {
   }
 
   spawnPoliceBoat(near) {
-    const def = boatDef('police-boat');
-    const mesh = makeBoatMesh(def);
+    const spec = boatSpec('police-boat');
+    const mesh = buildBoat(spec);
     this.scene.add(mesh.group);
     const a = this.rng() * Math.PI * 2;
-    const x = clamp(near.x + Math.cos(a) * 55, -380, 380);
-    const z = clamp(near.z + Math.sin(a) * 55, 210, 410);
-    const boat = new BoatEntity(def, mesh, x, z, a);
+    const x = clampNum(near.x + Math.cos(a) * 55, -380, 380);
+    const z = clampNum(near.z + Math.sin(a) * 55, 210, 410);
+    const boat = new Hull(spec, mesh, x, z, a);
     boat.driver = 'police';
     boat.unitName = 'MARINE-' + (10 + this.unitSeq++);
     this.policeBoats.push(boat);
@@ -125,7 +125,7 @@ export class Actors {
   }
 
   spawnHeli() {
-    const mesh = makeHelicopterMesh();
+    const mesh = buildChopper();
     this.scene.add(mesh.group);
     this.heli = { ...mesh, angle: 0, pos: new THREE.Vector3(0, 48, 0) };
   }
@@ -137,8 +137,10 @@ export class Actors {
   }
 
   // ---- per-frame ----------------------------------------------------------
-  // g: { playerPos, playerSpeedKmh, playerCar, playerBoat, onFoot, wantedStars, inWater, time, dt }
-  // Returns events for the game: { busted, playerDamage, hitPed, policeWrecked }
+  // g: { playerPos, playerSpeedKmh, playerCar, playerBoat, onFoot,
+  // wantedStars, inWater, time, dt }
+  // Returns events for the game: { busted, playerDamage, hitPed,
+  // policeWrecked }
   update(dt, g) {
     const events = { busted: false, playerDamage: 0, hitPed: false, policeWrecked: 0 };
     const allCars = [...this.traffic, ...this.parked, ...this.police];
@@ -150,11 +152,11 @@ export class Actors {
       const dx = target.x - car.pos.x, dz = target.z - car.pos.z;
       if (Math.hypot(dx, dz) < 6) { car.wp = (car.wp + 1) % car.loop.length; continue; }
       const wantHeading = Math.atan2(-dx, -dz);
-      const steer = clamp(angleDelta(car.heading, wantHeading) * 1.4, -1, 1);
-      const cruise = car.cruise / KMH;
+      const steer = clampNum(turnToward(car.heading, wantHeading) * 1.4, -1, 1);
+      const cruise = car.cruise / MS_TO_KMH;
       const throttle = car.speed < cruise ? 1 : 0;
-      this.driving.update(car, { throttle, steer, handbrake: false, nitro: false }, dt, allCars);
-      car.setLightBar(false, g.time);
+      this.roadster.update(car, { throttle, steer, handbrake: false, nitro: false }, dt, allCars);
+      car.flashLights(false, g.time);
     }
 
     // Pedestrians stroll, flee a fast player, fall when hit.
@@ -163,7 +165,7 @@ export class Actors {
         ped.down -= dt;
         if (ped.down <= 0) {
           ped.mesh.rotation.x = 0;
-          const spot = pick(this.rng, this.world.sidewalkSpots);
+          const spot = choose(this.rng, this.world.sidewalkSpots);
           ped.pos.set(spot.x, 0, spot.z);
         }
         continue;
@@ -179,10 +181,10 @@ export class Actors {
       } else {
         const tx = ped.target.x - ped.pos.x, tz = ped.target.z - ped.pos.z;
         if (Math.hypot(tx, tz) < 2) {
-          const spot = pick(this.rng, this.world.sidewalkSpots);
-          ped.target = { x: spot.x + range(this.rng, -14, 14), z: spot.z + range(this.rng, -14, 14) };
+          const spot = choose(this.rng, this.world.sidewalkSpots);
+          ped.target = { x: spot.x + between(this.rng, -14, 14), z: spot.z + between(this.rng, -14, 14) };
         }
-        ped.heading += angleDelta(ped.heading, Math.atan2(-tx, -tz)) * Math.min(1, dt * 4);
+        ped.heading += turnToward(ped.heading, Math.atan2(-tx, -tz)) * Math.min(1, dt * 4);
         ped.speed = 1.6;
       }
       ped.pos.x += -Math.sin(ped.heading) * ped.speed * dt;
@@ -203,7 +205,7 @@ export class Actors {
     }
 
     // ---- police ------------------------------------------------------------
-    const wantCars = WANTED.policeCarsPerStar[g.wantedStars] || 0;
+    const wantCars = HEAT.carsPerStar[g.wantedStars] || 0;
     while (this.police.length < wantCars) this.spawnPoliceCar(g.playerPos);
     while (this.police.length > wantCars) {
       const far = this.police.reduce((a, b) => {
@@ -218,7 +220,7 @@ export class Actors {
       const car = this.police[i];
       if (car.condition <= 0) {
         car.disabledTimer = (car.disabledTimer || 0) + dt;
-        car.setLightBar(false, g.time);
+        car.flashLights(false, g.time);
         if (car.disabledTimer > 12) this.removeEntity(this.police, car);
         continue;
       }
@@ -235,18 +237,18 @@ export class Actors {
           car.mode = 'roadblock';
           throttle = 0;
           car.speed = 0;
-          car.heading += angleDelta(car.heading, (g.playerHeading || 0) + Math.PI / 2) * Math.min(1, dt * 3);
+          car.heading += turnToward(car.heading, (g.playerHeading || 0) + Math.PI / 2) * Math.min(1, dt * 3);
         } else {
           car.mode = 'roadblock';
-          steer = clamp(angleDelta(car.heading, Math.atan2(-bx, -bz)) * 1.5, -1, 1);
+          steer = clampNum(turnToward(car.heading, Math.atan2(-bx, -bz)) * 1.5, -1, 1);
         }
       } else {
         car.mode = dist < 6 ? 'ramming' : 'pursuit';
-        steer = clamp(angleDelta(car.heading, Math.atan2(-dx, -dz)) * 1.6, -1, 1);
+        steer = clampNum(turnToward(car.heading, Math.atan2(-dx, -dz)) * 1.6, -1, 1);
         if (dist < 3 && g.playerSpeedKmh < 4) throttle = 0;
       }
-      const ev = this.driving.update(car, { throttle, steer, handbrake: false, nitro: false }, dt, allCars);
-      car.setLightBar(true, g.time);
+      const ev = this.roadster.update(car, { throttle, steer, handbrake: false, nitro: false }, dt, allCars);
+      car.flashLights(true, g.time);
       if (ev.crashed > 12) {
         car.condition -= ev.crashed * 1.4;
         if (car.condition <= 0) {
@@ -265,7 +267,7 @@ export class Actors {
     }
 
     // Helicopter from 3 stars.
-    if (g.wantedStars >= WANTED.heliFromStar) {
+    if (g.wantedStars >= HEAT.heliAtStar) {
       if (!this.heli) this.spawnHeli();
       const h = this.heli;
       h.angle += dt * 0.35;
@@ -286,15 +288,15 @@ export class Actors {
     }
 
     // Police boats from 4 stars while the player is in or near the water.
-    const wantBoats = g.wantedStars >= WANTED.boatsFromStar && g.inWater ? 2 : 0;
+    const wantBoats = g.wantedStars >= HEAT.boatsAtStar && g.inWater ? 2 : 0;
     while (this.policeBoats.length < wantBoats) this.spawnPoliceBoat(g.playerPos);
     while (this.policeBoats.length > wantBoats) {
       this.removeEntity(this.policeBoats, this.policeBoats[this.policeBoats.length - 1]);
     }
     for (const boat of this.policeBoats) {
       const dx = g.playerPos.x - boat.pos.x, dz = g.playerPos.z - boat.pos.z;
-      const steer = clamp(angleDelta(boat.heading, Math.atan2(-dx, -dz)) * 1.4, -1, 1);
-      this.boating.update(boat, { throttle: 1, steer }, dt, g.time);
+      const steer = clampNum(turnToward(boat.heading, Math.atan2(-dx, -dz)) * 1.4, -1, 1);
+      this.sailing.update(boat, { throttle: 1, steer }, dt, g.time);
     }
 
     // Busted: a police unit sits on the player while the player is slow.

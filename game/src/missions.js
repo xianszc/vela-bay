@@ -1,31 +1,31 @@
 // The story of Vela Bay: eight jobs, one crew, one long sunset. Each
-// mission is a list of steps; a step is a place to reach, a vehicle to
-// steal, a chase to survive or a police car to wreck. The engine moves a
-// glowing beacon to the current step and tells the game when a step, or a
-// whole mission, is done.
+// job is a list of steps; a step is a place to reach, a vehicle to
+// steal, a chase to survive or a police car to wreck. The runner moves a
+// glowing beacon to the current step and tells the game when a step, or
+// a whole job, is done.
 
 import * as THREE from 'three';
-import { ECONOMY, CREW } from './config.js';
+import { PAYOUTS, CREW } from './config.js';
 
-export const MISSIONS = [
+export const JOBS = [
   {
     id: 'warm-up', title: 'WARM-UP LAP', speaker: 'rex',
-    brief: "Rex: First day on the job, kid. Take a lap around Downtown and meet me at the marina. Don't scratch the paint.",
+    brief: "Rex: New kid on the crew. Take one easy lap around Downtown and meet me at the marina. Try not to scratch anything.",
     steps: [{ text: 'Drive to the marina marker', type: 'goto', x: -138, z: 140, radius: 10 }],
   },
   {
     id: 'first-wheels', title: 'FIRST WHEELS', speaker: 'rex',
-    brief: 'Rex: We need wheels and we are not paying for them. Jack any parked car on the street. The cops will notice — that is the point.',
+    brief: 'Rex: A crew needs wheels and we do not pay for them. Jack any parked car on the street. The cops will notice — that is half the fun.',
     steps: [{ text: 'Steal any car (walk up and press F)', type: 'stealCar' }],
   },
   {
     id: 'the-pickup', title: 'THE PICKUP', speaker: 'mara',
-    brief: "Mara: I'm waiting up in Old Town with the harbour charts. Come get me before the tide turns. Bring the car, not the cops.",
+    brief: "Mara: I am up in Old Town with the harbour charts. Come fetch me before the tide turns. Bring the car, not the cops.",
     steps: [{ text: 'Drive to Old Town Hill', type: 'goto', x: -180, z: -140, radius: 12 }],
   },
   {
     id: 'canal-run', title: 'CANAL RUN', speaker: 'theo',
-    brief: 'Theo: The mark moved his money through the canals. Run the canal route and lose the tail before you reach the east bridge.',
+    brief: 'Theo: The mark moved his money through the canals. Run the canal route and shake the tail before you reach the east bridge.',
     steps: [
       { text: 'Reach the canal bridge', type: 'goto', x: 134, z: 120, radius: 12 },
       { text: 'Lose the cops, then reach the east bridge', type: 'loseCops', x: 134, z: 0, radius: 12, maxStars: 1 },
@@ -49,7 +49,7 @@ export const MISSIONS = [
   },
   {
     id: 'roadblock-run', title: 'ROADBLOCK RUN', speaker: 'rex',
-    brief: 'Rex: They put a roadblock on the causeway. Smash through it. Wreck two of their interceptors and the rest will think twice.',
+    brief: 'Rex: They put a roadblock on the causeway. Smash straight through it. Wreck two of their interceptors and the rest will think twice.',
     steps: [
       { text: 'Wreck 2 police cars (ram them hard)', type: 'ram', count: 2 },
       { text: 'Reach the boardwalk', type: 'goto', x: 0, z: 186, radius: 12 },
@@ -66,7 +66,7 @@ export const MISSIONS = [
   },
 ];
 
-export class MissionEngine {
+export class JobRunner {
   constructor(scene) {
     this.scene = scene;
     this.index = 0;
@@ -93,8 +93,8 @@ export class MissionEngine {
     scene.add(this.ring);
   }
 
-  get mission() { return MISSIONS[this.index]; }
-  get currentStep() { return this.active ? this.mission.steps[this.step] : null; }
+  get job() { return JOBS[this.index]; }
+  get currentStep() { return this.active ? this.job.steps[this.step] : null; }
 
   start(index) {
     this.index = index;
@@ -103,10 +103,10 @@ export class MissionEngine {
     this.done = false;
     this.rammed = 0;
     this.stepTimer = 0;
-    this.updateBeacon();
+    this.moveBeacon();
   }
 
-  updateBeacon() {
+  moveBeacon() {
     const s = this.currentStep;
     if (!s || s.x === undefined) {
       this.beacon.visible = false;
@@ -147,14 +147,14 @@ export class MissionEngine {
     if (!done) return null;
     this.step++;
     this.stepTimer = 0;
-    if (this.step >= this.mission.steps.length) {
+    if (this.step >= this.job.steps.length) {
       this.active = false;
       this.done = true;
       this.beacon.visible = false;
       this.ring.visible = false;
-      return { missionDone: true, reward: ECONOMY.missionReward[this.index], rep: ECONOMY.repPerMission[this.index] };
+      return { missionDone: true, reward: PAYOUTS.jobCash[this.index], rep: PAYOUTS.jobRep[this.index] };
     }
-    this.updateBeacon();
+    this.moveBeacon();
     return { stepDone: true };
   }
 
@@ -167,14 +167,14 @@ export class MissionEngine {
   }
 
   speakerLine() {
-    const m = this.mission;
-    const c = CREW[m.speaker];
-    return { name: c.name, role: c.role, color: c.color, initials: c.initials, text: m.brief };
+    const j = this.job;
+    const c = CREW[j.speaker];
+    return { name: c.name, role: c.role, color: c.color, initials: c.initials, text: j.brief };
   }
 
   progressText() {
-    const m = this.mission;
-    return `MISSION ${this.index + 1} / ${MISSIONS.length}: ${m.title}`;
+    const j = this.job;
+    return `MISSION ${this.index + 1} / ${JOBS.length}: ${j.title}`;
   }
 
   stepText() {
